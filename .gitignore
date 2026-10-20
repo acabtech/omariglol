@@ -3,6 +3,9 @@
 **/*.rs.bk
 *.pdb
 
+# Published build output (see Makefile)
+/bin/
+
 # Node / frontend
 node_modules/
 dist/

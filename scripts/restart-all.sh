@@ -119,7 +119,13 @@ stop_gui
 # 2. Rebuild, if asked.
 if [[ "$rebuild" == 1 ]]; then
   log "rebuilding the CLI (release)"
-  cargo build --release --locked --workspace
+  # `make build` compiles the workspace and publishes the binaries to bin/;
+  # fall back to a plain cargo build when make is unavailable.
+  if have make; then
+    make build
+  else
+    cargo build --release --locked --workspace
+  fi
   if have npm; then
     log "rebuilding the desktop frontend"
     npm run build

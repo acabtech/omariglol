@@ -4,9 +4,9 @@
 //!
 //! ## Status
 //!
-//! **Implemented (M8).** `discover`, `scpi`, `screenshot` and `benchmark` are
-//! wired to `omariglol-core`. `run` is defined but still stubbed: it needs the
-//! embedded Python engine from M9, which has not landed yet.
+//! **Implemented (M8).** `discover`, `scpi`, `screenshot`, `benchmark` and
+//! `run` are all wired: the first four to `omariglol-core`, and `run` to the
+//! embedded Python engine in `omariglol-script` (M9).
 
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
@@ -19,6 +19,7 @@ use omariglol_core::benchmark::{self, BenchmarkOptions, BenchmarkReport};
 use omariglol_core::device::{Device, Target, Transport};
 use omariglol_core::transport::{self, Session, parse_address, to_hex};
 use omariglol_core::{discovery, screenshot};
+use omariglol_script::{ScriptEngine, ScriptEvent, ScriptOptions};
 
 /// Process-wide verbosity, set once from the global `-v` flag.
 static VERBOSITY: AtomicU8 = AtomicU8::new(0);
@@ -504,9 +505,37 @@ fn print_benchmark_table(report: &BenchmarkReport) {
 // ---------------------------------------------------------------------------
 
 fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
-    let _ = args;
-    anyhow::bail!(
-        "`run` needs the embedded Python engine (M9), which is not implemented yet — \
-         see plans/roadmap.md"
-    )
+    let mut engine = ScriptEngine::new()?;
+    let options = ScriptOptions {
+        args: args.args.clone(),
+        ..Default::default()
+    };
+
+    vlog!(1, "running {}", args.script.display());
+    let result = engine.run_file(&args.script, &options, |event| match event {
+        ScriptEvent::Stdout { text } => {
+            print!("{text}");
+            let _ = std::io::stdout().flush();
+        }
+        ScriptEvent::Stderr { text } => {
+            eprint!("{text}");
+            let _ = std::io::stderr().flush();
+        }
+        ScriptEvent::Sample { series, value } => {
+            vlog!(1, "[sample] {series} = {value}");
+        }
+        ScriptEvent::Status { message } => {
+            vlog!(1, "[status] {message}");
+        }
+    })?;
+
+    vlog!(1, "finished in {:.1} ms", result.duration_ms);
+
+    // Mirror CPython: a non-zero `sys.exit()` code becomes the process status.
+    if let Some(code) = result.exit_code {
+        if code != 0 {
+            std::process::exit(code);
+        }
+    }
+    Ok(())
 }

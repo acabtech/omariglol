@@ -5,6 +5,7 @@ pub mod rpc;
 pub mod vxi11;
 
 use std::net::{IpAddr, ToSocketAddrs};
+use std::time::Duration;
 
 use crate::device::{Target, Transport};
 use crate::error::{Error, Result};
@@ -14,7 +15,7 @@ use crate::error::{Error, Result};
 /// Implementations are deliberately blocking: instruments are slow, the
 /// protocol is request/response, and callers (Tauri commands, CLI) already run
 /// us off the UI thread.
-pub trait ScpiTransport: Send {
+pub trait ScpiTransport: Send + Sync {
     /// Write a command. A terminator is added if the caller omitted one.
     fn send(&mut self, command: &str) -> Result<()>;
 
@@ -29,6 +30,14 @@ pub trait ScpiTransport: Send {
 
     /// Release the link. Called on drop paths where possible.
     fn close(&mut self) -> Result<()>;
+
+    /// Adjust the socket timeout for subsequent operations.
+    ///
+    /// The default is a no-op so a transport that cannot retune a live socket
+    /// still satisfies the trait; the raw and VXI-11 transports override it.
+    fn set_timeout(&mut self, _timeout: Duration) -> Result<()> {
+        Ok(())
+    }
 
     /// Human-readable description of the underlying channel.
     fn description(&self) -> String;
@@ -79,6 +88,11 @@ impl Session {
 
     pub fn description(&self) -> String {
         self.transport.description()
+    }
+
+    /// Adjust the socket timeout for subsequent operations.
+    pub fn set_timeout(&mut self, timeout: Duration) -> Result<()> {
+        self.transport.set_timeout(timeout)
     }
 
     pub fn close(&mut self) -> Result<()> {

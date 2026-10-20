@@ -67,7 +67,7 @@ Embeds CPython via PyO3 and exposes an instrument API to Python. This is where
 - `numpy` / `matplotlib` are available for free.
 - PyO3 with `abi3` means one wheel-free binary works across Python 3.10+.
 
-Planned Python surface (not yet implemented):
+Python surface:
 
 ```python
 from omariglol import connect

@@ -23,12 +23,12 @@ Python scripting plus Omarchy integration.
 
 ### `omariglol-script`
 
-- [ ] Embed CPython via PyO3 (`abi3-py310`, `auto-initialize`)
-- [ ] Expose `omariglol.connect()` returning an instrument object with
+- [x] Embed CPython via PyO3 (`abi3-py310`, `auto-initialize`)
+- [x] Expose `omariglol.connect()` returning an instrument object with
       `write`, `query`, `query_raw`, `idn`, `timeout`
-- [ ] Stream `print()` output and progress back to the caller
-- [ ] CSV logging helper
-- [ ] Cancel a running script
+- [x] Stream `print()` output and progress back to the caller
+- [x] CSV logging helper
+- [x] Cancel a running script
 
 ### CLI
 
@@ -36,7 +36,7 @@ Python scripting plus Omarchy integration.
 - [ ] `scpi` with `--raw`, `--port`, `--hex`, and an interactive mode
 - [ ] `screenshot` with `--raw`, `--command` override
 - [ ] `benchmark` with `--count`, `--command`, `--json`
-- [ ] `run` for Python scripts
+- [x] `run` for Python scripts
 
 ### Desktop app
 

@@ -383,6 +383,14 @@ impl ScpiTransport for Vxi11Transport {
         self.call_error(PROC_DESTROY_LINK, &params)
     }
 
+    fn set_timeout(&mut self, timeout: Duration) -> Result<()> {
+        // The VXI-11 `io_timeout` is carried in every `device_read`/`write`
+        // request, so updating the field is enough; the RPC socket keeps its
+        // own connect-time timeout.
+        self.timeout = timeout;
+        Ok(())
+    }
+
     fn description(&self) -> String {
         format!("VXI-11 {} (lid {})", self.addr, self.lid)
     }

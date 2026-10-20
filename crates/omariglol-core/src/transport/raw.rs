@@ -173,6 +173,10 @@ impl ScpiTransport for RawTransport {
         Ok(())
     }
 
+    fn set_timeout(&mut self, timeout: Duration) -> Result<()> {
+        RawTransport::set_timeout(self, timeout)
+    }
+
     fn description(&self) -> String {
         format!("raw TCP {}", self.addr)
     }

@@ -16,10 +16,12 @@
 //!
 //! **In progress.** The module layout, the public types and the trait
 //! contracts are in place. The ONC RPC / XDR layer ([`transport::rpc`], M1),
-//! the VXI-11 transport ([`transport::vxi11`], M2) and the raw TCP transport
-//! ([`transport::raw`], M3) are implemented and tested; the discovery,
-//! screenshot and benchmark layers are still stubbed with `todo!()`. See
-//! `docs/roadmap.md` for the order they are intended to land in.
+//! the VXI-11 transport ([`transport::vxi11`], M2), the raw TCP transport
+//! ([`transport::raw`], M3), the shared device model plus [`Session`] wrapper
+//! ([`device`], [`transport`], M4) and discovery ([`discovery`], M5) are
+//! implemented and tested; the screenshot and benchmark layers are still
+//! stubbed with `todo!()`. See `docs/roadmap.md` for the order they are
+//! intended to land in.
 //!
 //! ## Design constraints
 //!

@@ -51,11 +51,25 @@ impl Error {
     ///
     /// Callers use this to distinguish "instrument is present but slow" from
     /// "instrument is not there", which changes what the UI should say.
+    ///
+    /// A timeout can surface three ways: as our own [`Error::Timeout`], as a
+    /// VXI-11 `Device_ErrorCode` 15 (`I/O timeout`), or as an OS-level
+    /// `TimedOut`/`WouldBlock` I/O error from a socket read.
     pub fn is_timeout(&self) -> bool {
-        let _ = self;
-        todo!("classify timeout-shaped errors")
+        match self {
+            Error::Timeout(_) => true,
+            Error::Vxi11 { code, .. } => *code == VXI11_IO_TIMEOUT,
+            Error::Io(err) => matches!(
+                err.kind(),
+                io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+            ),
+            _ => false,
+        }
     }
 }
+
+/// The VXI-11 `Device_ErrorCode` for an I/O timeout.
+const VXI11_IO_TIMEOUT: i32 = 15;
 
 /// Human-readable name for a VXI-11 `Device_ErrorCode`.
 ///
@@ -83,16 +97,42 @@ pub fn vxi11_error_name(code: i32) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
 
     #[test]
-    #[ignore]
     fn test_is_timeout_classifies_timeout() {
-        todo!("classify timeout-shaped errors")
+        assert!(Error::Timeout("read".to_string()).is_timeout());
+        assert!(
+            Error::Vxi11 {
+                code: 15,
+                message: "I/O timeout".to_string(),
+            }
+            .is_timeout()
+        );
+        assert!(Error::Io(io::Error::new(io::ErrorKind::TimedOut, "slow")).is_timeout());
+        assert!(Error::Io(io::Error::new(io::ErrorKind::WouldBlock, "slow")).is_timeout());
     }
 
     #[test]
-    #[ignore]
+    fn test_is_timeout_rejects_other_errors() {
+        assert!(
+            !Error::Vxi11 {
+                code: 4,
+                message: "invalid link identifier".to_string(),
+            }
+            .is_timeout()
+        );
+        assert!(!Error::Io(io::Error::new(io::ErrorKind::ConnectionRefused, "nope")).is_timeout());
+        assert!(!Error::Other("boom".to_string()).is_timeout());
+    }
+
+    #[test]
     fn test_vxi11_error_name_maps_known_codes() {
-        todo!("map Device_ErrorCode to its spec name")
+        assert_eq!(vxi11_error_name(0), "no error");
+        assert_eq!(vxi11_error_name(1), "syntax error");
+        assert_eq!(vxi11_error_name(4), "invalid link identifier");
+        assert_eq!(vxi11_error_name(15), "I/O timeout");
+        assert_eq!(vxi11_error_name(23), "abort");
+        assert_eq!(vxi11_error_name(9999), "unknown error");
     }
 }

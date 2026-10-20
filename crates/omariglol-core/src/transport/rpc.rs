@@ -507,8 +507,13 @@ pub fn pmap_getport_udp(
     }
 }
 
-/// Send a PMAP_DUMP UDP broadcast and collect responses.
-pub fn pmap_dump_udp(timeout: Duration) -> Result<Vec<PortMapping>> {
+/// Send a PMAP_DUMP UDP broadcast and collect responses, tagged with the host
+/// that answered.
+///
+/// Discovery needs the source address of each reply to know *which* instrument
+/// exposed the program, so this is the primitive; [`pmap_dump_udp`] flattens it
+/// for callers that only want the mappings.
+pub fn pmap_dump_udp_hosts(timeout: Duration) -> Result<Vec<(IpAddr, Vec<PortMapping>)>> {
     let socket = UdpSocket::bind("0.0.0.0:0")?;
     socket.set_read_timeout(Some(timeout))?;
     socket.set_broadcast(true)?;
@@ -518,16 +523,16 @@ pub fn pmap_dump_udp(timeout: Duration) -> Result<Vec<PortMapping>> {
     socket.send_to(&pmap_dump_udp_payload(xid), broadcast_addr)?;
 
     // Collect responses until the read timeout fires.
-    let mut mappings = Vec::new();
+    let mut hosts = Vec::new();
     let mut buf = vec![0u8; MAX_UDP_DATAGRAM];
     loop {
         match socket.recv_from(&mut buf) {
-            Ok((n, _src)) => {
+            Ok((n, src)) => {
                 // A reply from a host that did not echo our XID is ignored.
                 if let Ok(reply) = parse_reply(&buf[..n], Some(xid)) {
                     let mut reader = XdrReader::new(&reply);
                     if let Ok(found) = parse_pmaplist(&mut reader) {
-                        mappings.extend(found);
+                        hosts.push((src.ip(), found));
                     }
                 }
             }
@@ -536,7 +541,15 @@ pub fn pmap_dump_udp(timeout: Duration) -> Result<Vec<PortMapping>> {
             Err(_) => break,
         }
     }
-    Ok(mappings)
+    Ok(hosts)
+}
+
+/// Send a PMAP_DUMP UDP broadcast and collect the flattened program table.
+pub fn pmap_dump_udp(timeout: Duration) -> Result<Vec<PortMapping>> {
+    Ok(pmap_dump_udp_hosts(timeout)?
+        .into_iter()
+        .flat_map(|(_, mappings)| mappings)
+        .collect())
 }
 
 #[cfg(test)]

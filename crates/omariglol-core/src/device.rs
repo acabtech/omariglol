@@ -6,6 +6,17 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::transport::raw::DEFAULT_RAW_PORT;
+
+/// The portmapper port, dialed to resolve the VXI-11 core channel.
+///
+/// VXI-11 has no fixed device port: the core channel is assigned dynamically
+/// and looked up through the portmapper, which always lives on port 111.
+pub const DEFAULT_VXI11_PORT: u16 = 111;
+
+/// Default socket timeout applied to a freshly built [`Target`].
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// How an instrument was located.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -20,8 +31,12 @@ pub enum DiscoveryMethod {
 
 impl fmt::Display for DiscoveryMethod {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let _ = f;
-        todo!("human-readable discovery method")
+        let name = match self {
+            DiscoveryMethod::Vxi11Broadcast => "vxi11-broadcast",
+            DiscoveryMethod::Mdns => "mdns",
+            DiscoveryMethod::Manual => "manual",
+        };
+        f.write_str(name)
     }
 }
 
@@ -56,27 +71,43 @@ pub(crate) fn default_device_name() -> String {
 impl Device {
     /// Build a manual device entry for a host the user typed in.
     pub fn manual(address: IpAddr) -> Self {
-        let _ = address;
-        todo!("construct a manual Device entry")
+        Self {
+            address,
+            hostname: None,
+            vxi11_port: None,
+            raw_port: None,
+            mdns_name: None,
+            device_name: default_device_name(),
+            method: DiscoveryMethod::Manual,
+        }
     }
 
     /// The address in `lxi`'s display form: `IP (hostname)` when known.
     pub fn display_address(&self) -> String {
-        let _ = self;
-        todo!("format the address for display")
+        match &self.hostname {
+            Some(hostname) => format!("{} ({})", self.address, hostname),
+            None => self.address.to_string(),
+        }
     }
 
     /// Best-effort label for lists and bar widgets.
+    ///
+    /// Prefers the mDNS instance name, then a resolved hostname, and finally
+    /// falls back to the bare IP address.
     pub fn label(&self) -> String {
-        let _ = self;
-        todo!("pick the friendliest available name")
+        if let Some(name) = self.mdns_name.as_deref() {
+            return name.to_string();
+        }
+        if let Some(hostname) = self.hostname.as_deref() {
+            return hostname.to_string();
+        }
+        self.address.to_string()
     }
 }
 
 impl fmt::Display for Device {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let _ = f;
-        todo!("render a device for the CLI")
+        write!(f, "{} [{}]", self.label(), self.method)
     }
 }
 
@@ -92,8 +123,11 @@ pub enum Transport {
 
 impl fmt::Display for Transport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let _ = f;
-        todo!("human-readable transport name")
+        let name = match self {
+            Transport::Vxi11 => "vxi11",
+            Transport::Raw => "raw",
+        };
+        f.write_str(name)
     }
 }
 
@@ -111,90 +145,164 @@ pub struct Target {
 
 impl Target {
     pub fn new(address: IpAddr, transport: Transport) -> Self {
-        let _ = (address, transport);
-        todo!("build a target with default port and timeout")
+        Self {
+            address,
+            transport,
+            port: None,
+            device_name: default_device_name(),
+            timeout: DEFAULT_TIMEOUT,
+        }
     }
 
-    // The stub does not mutate yet; the builder contract still takes `self`.
-    #[allow(unused_mut)]
     pub fn with_port(mut self, port: u16) -> Self {
-        let _ = port;
-        todo!("override the port")
+        self.port = Some(port);
+        self
     }
 
-    #[allow(unused_mut)]
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
-        let _ = timeout;
-        todo!("override the timeout")
+        self.timeout = timeout;
+        self
     }
 
     /// The port this target will actually dial.
+    ///
+    /// An explicit override always wins. Otherwise the transport default is
+    /// used: the portmapper port for VXI-11 (the core channel is resolved from
+    /// there) and 5025 for the raw socket.
     pub fn effective_port(&self) -> u16 {
-        let _ = self;
-        todo!("resolve the transport's default port")
+        self.port.unwrap_or(match self.transport {
+            Transport::Vxi11 => DEFAULT_VXI11_PORT,
+            Transport::Raw => DEFAULT_RAW_PORT,
+        })
     }
 
     /// Derive a target from a discovered device.
+    ///
+    /// The port discovered for the requested transport is carried across; the
+    /// device name and address come from the device, and the timeout is the
+    /// default.
     pub fn from_device(device: &Device, transport: Transport) -> Self {
-        let _ = (device, transport);
-        todo!("carry the discovered ports across to the target")
+        let port = match transport {
+            Transport::Vxi11 => device.vxi11_port,
+            Transport::Raw => device.raw_port,
+        };
+        Self {
+            address: device.address,
+            transport,
+            port,
+            device_name: device.device_name.clone(),
+            timeout: DEFAULT_TIMEOUT,
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    fn ip(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
 
     #[test]
-    #[ignore]
     fn test_discovery_method_display() {
-        todo!("human-readable discovery method")
+        assert_eq!(
+            DiscoveryMethod::Vxi11Broadcast.to_string(),
+            "vxi11-broadcast"
+        );
+        assert_eq!(DiscoveryMethod::Mdns.to_string(), "mdns");
+        assert_eq!(DiscoveryMethod::Manual.to_string(), "manual");
     }
 
     #[test]
-    #[ignore]
     fn test_device_manual() {
-        todo!("construct a manual Device entry")
+        let device = Device::manual(ip("192.168.1.10"));
+        assert_eq!(device.address, ip("192.168.1.10"));
+        assert_eq!(device.method, DiscoveryMethod::Manual);
+        assert_eq!(device.device_name, "inst0");
+        assert!(device.hostname.is_none());
+        assert!(device.vxi11_port.is_none());
+        assert!(device.raw_port.is_none());
+        assert!(device.mdns_name.is_none());
     }
 
     #[test]
-    #[ignore]
     fn test_device_display_address() {
-        todo!("format the address for display")
+        let mut device = Device::manual(ip("192.168.1.10"));
+        assert_eq!(device.display_address(), "192.168.1.10");
+        device.hostname = Some("scope.local".to_string());
+        assert_eq!(device.display_address(), "192.168.1.10 (scope.local)");
     }
 
     #[test]
-    #[ignore]
     fn test_device_label() {
-        todo!("pick the friendliest available name")
+        let mut device = Device::manual(ip("192.168.1.10"));
+        // Falls back to the bare IP.
+        assert_eq!(device.label(), "192.168.1.10");
+        // A hostname beats the IP.
+        device.hostname = Some("scope.local".to_string());
+        assert_eq!(device.label(), "scope.local");
+        // The mDNS name beats the hostname.
+        device.mdns_name = Some("Rigol DS1054Z".to_string());
+        assert_eq!(device.label(), "Rigol DS1054Z");
     }
 
     #[test]
-    #[ignore]
     fn test_device_display() {
-        todo!("render a device for the CLI")
+        let mut device = Device::manual(ip("192.168.1.10"));
+        device.mdns_name = Some("scope".to_string());
+        assert_eq!(device.to_string(), "scope [manual]");
     }
 
     #[test]
-    #[ignore]
     fn test_transport_display() {
-        todo!("human-readable transport name")
+        assert_eq!(Transport::Vxi11.to_string(), "vxi11");
+        assert_eq!(Transport::Raw.to_string(), "raw");
     }
 
     #[test]
-    #[ignore]
     fn test_target_new() {
-        todo!("build a target with default port and timeout")
+        let target = Target::new(ip("192.168.1.10"), Transport::Raw);
+        assert_eq!(target.address, ip("192.168.1.10"));
+        assert_eq!(target.transport, Transport::Raw);
+        assert_eq!(target.port, None);
+        assert_eq!(target.device_name, "inst0");
+        assert_eq!(target.timeout, DEFAULT_TIMEOUT);
     }
 
     #[test]
-    #[ignore]
+    fn test_target_builders() {
+        let target = Target::new(ip("192.168.1.10"), Transport::Raw)
+            .with_port(1234)
+            .with_timeout(Duration::from_millis(250));
+        assert_eq!(target.port, Some(1234));
+        assert_eq!(target.timeout, Duration::from_millis(250));
+    }
+
+    #[test]
     fn test_target_effective_port() {
-        todo!("resolve the transport's default port")
+        let raw = Target::new(ip("192.168.1.10"), Transport::Raw);
+        assert_eq!(raw.effective_port(), DEFAULT_RAW_PORT);
+
+        let vxi11 = Target::new(ip("192.168.1.10"), Transport::Vxi11);
+        assert_eq!(vxi11.effective_port(), DEFAULT_VXI11_PORT);
+
+        let overridden = raw.with_port(9999);
+        assert_eq!(overridden.effective_port(), 9999);
     }
 
     #[test]
-    #[ignore]
     fn test_target_from_device() {
-        todo!("carry the discovered ports across to the target")
+        let mut device = Device::manual(ip("192.168.1.10"));
+        device.vxi11_port = Some(1024);
+        device.raw_port = Some(5025);
+
+        let vxi11 = Target::from_device(&device, Transport::Vxi11);
+        assert_eq!(vxi11.address, ip("192.168.1.10"));
+        assert_eq!(vxi11.port, Some(1024));
+        assert_eq!(vxi11.device_name, "inst0");
+
+        let raw = Target::from_device(&device, Transport::Raw);
+        assert_eq!(raw.port, Some(5025));
     }
 }

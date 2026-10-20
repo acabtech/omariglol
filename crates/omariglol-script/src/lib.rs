@@ -411,7 +411,7 @@ mod tests {
              ws = Workspace.create('test-ws')\n\
              assert ws.name == 'test-ws', ws.name\n\
              with ws.run('demo') as run:\n\
-                 run.record(step=1, value=2.5)\n\
+             \x20   run.record(step=1, value=2.5)\n\
              assert ws.timeline_len >= 2, ws.timeline_len\n\
              print('ok')\n",
         );

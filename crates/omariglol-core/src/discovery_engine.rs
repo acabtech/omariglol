@@ -388,28 +388,22 @@ impl DiscoveryEngine {
         let vlan = config.primary.as_ref().and_then(|interface| interface.vlan);
 
         // 2. Broadcast and mDNS, which find self-advertising instruments.
-        let mut discovered: Vec<Device> = Vec::new();
-        if options.use_broadcast
-            && let Ok(devices) = discovery::discover_vxi11(options.listen_timeout)
-        {
-            discovered = discovery::merge_devices(discovered, devices);
-        }
-        if options.use_mdns
-            && let Ok(devices) = discovery::discover_mdns(options.listen_timeout)
-        {
-            discovered = discovery::merge_devices(discovered, devices);
-        }
-
-        {
-            let mut cache = self.cache.lock().unwrap();
-            for device in discovered {
-                let entry = CachedInstrument::from_device(device, vlan, options.ttl_secs);
-                on_event(DiscoveryEvent::InstrumentFound {
-                    instrument: entry.clone(),
-                });
-                cache.insert(entry);
-            }
-        }
+        //
+        // Each listens for a fixed window, so they run on their own background
+        // threads while the subnet scan proceeds on this one. All three overlap,
+        // which keeps a full scan within the performance budget instead of
+        // paying each listen window and the scan back to back.
+        let listen_timeout = options.listen_timeout;
+        let broadcast_handle = options.use_broadcast.then(|| {
+            std::thread::spawn(move || {
+                discovery::discover_vxi11(listen_timeout).unwrap_or_default()
+            })
+        });
+        let mdns_handle = options.use_mdns.then(|| {
+            std::thread::spawn(move || {
+                discovery::discover_mdns(listen_timeout).unwrap_or_default()
+            })
+        });
 
         // 3. Build the host list for direct probing.
         let mut hosts: Vec<IpAddr> = Vec::new();
@@ -464,6 +458,29 @@ impl DiscoveryEngine {
             options.concurrency,
             on_found,
         );
+
+        // 4b. Fold in the broadcast/mDNS results once they have finished.
+        let mut advertised: Vec<Device> = Vec::new();
+        if let Some(handle) = broadcast_handle
+            && let Ok(devices) = handle.join()
+        {
+            advertised = discovery::merge_devices(advertised, devices);
+        }
+        if let Some(handle) = mdns_handle
+            && let Ok(devices) = handle.join()
+        {
+            advertised = discovery::merge_devices(advertised, devices);
+        }
+        if !advertised.is_empty() {
+            let mut cache = self.cache.lock().unwrap();
+            for device in advertised {
+                let entry = CachedInstrument::from_device(device, vlan, options.ttl_secs);
+                on_event(DiscoveryEvent::InstrumentFound {
+                    instrument: entry.clone(),
+                });
+                cache.insert(entry);
+            }
+        }
 
         // 5. Evict expired entries and collect the fresh set.
         let found = {

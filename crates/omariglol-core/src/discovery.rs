@@ -442,10 +442,16 @@ pub fn merge_devices(mut base: Vec<Device>, extra: Vec<Device>) -> Vec<Device> {
 pub const SCPI_PROBE_PORTS: [u16; 2] = [5025, 5555];
 
 /// The default per-host connect/read timeout for a TCP probe.
-pub const PROBE_TIMEOUT: Duration = Duration::from_millis(250);
+///
+/// Kept short so a mostly-empty subnet scans quickly: a refused connection
+/// fails immediately, and only a silent host pays the full timeout.
+pub const PROBE_TIMEOUT: Duration = Duration::from_millis(200);
 
 /// The default number of worker threads a subnet scan uses.
-pub const DEFAULT_SCAN_CONCURRENCY: usize = 64;
+///
+/// A `/24` is 253 hosts; at 96 workers and a 200 ms timeout the worst case is
+/// roughly `253 / 96 * 0.2 s * 2 ports ≈ 1.1 s`.
+pub const DEFAULT_SCAN_CONCURRENCY: usize = 96;
 
 /// A host that answered a SCPI `*IDN?` probe.
 #[derive(Debug, Clone, Serialize, Deserialize)]

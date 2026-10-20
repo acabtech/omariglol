@@ -609,16 +609,18 @@ impl Workspace {
 
     /// Define a preset from a mapping of instrument name to command list.
     fn define_preset(&self, name: &str, mapping: Bound<'_, PyDict>) -> PyResult<()> {
-        let mut data = self.data.lock().unwrap();
+        // Resolve every instrument *before* taking the workspace lock:
+        // `resolve_instrument` locks `self.data` itself, and `std::sync::Mutex`
+        // is not reentrant, so holding the guard across the call would deadlock.
         let mut preset = Preset::new(format!("preset-{}", now_millis()), name);
         for (key, value) in mapping.iter() {
-            let id = resolve_instrument(&self.data, &key)?;
+            let id = resolve_instrument_lenient(&self.data, &key)?;
             let commands: Vec<String> = value.extract()?;
             for command in commands {
                 preset.add_command(id.clone(), command);
             }
         }
-        data.inner.add_preset(preset);
+        self.data.lock().unwrap().inner.add_preset(preset);
         Ok(())
     }
 
@@ -636,8 +638,8 @@ impl Workspace {
         comparison: &str,
         fallback: Option<&str>,
     ) -> PyResult<()> {
-        let source_id = resolve_instrument(&self.data, &source)?;
-        let target_id = resolve_instrument(&self.data, &target)?;
+        let source_id = resolve_instrument_lenient(&self.data, &source)?;
+        let target_id = resolve_instrument_lenient(&self.data, &target)?;
         let comparison = match comparison {
             ">" => Comparison::GreaterThan,
             ">=" => Comparison::GreaterOrEqual,
@@ -676,8 +678,8 @@ impl Workspace {
         condition: &str,
         action: &str,
     ) -> PyResult<()> {
-        let source_id = resolve_instrument(&self.data, &source)?;
-        let target_id = resolve_instrument(&self.data, &target)?;
+        let source_id = resolve_instrument_lenient(&self.data, &source)?;
+        let target_id = resolve_instrument_lenient(&self.data, &target)?;
         let trigger = Trigger::new(
             format!("trg-{}", now_millis()),
             source_id,
@@ -910,6 +912,32 @@ fn resolve_instrument(
         return guard
             .resolve_id(&name)
             .ok_or_else(|| PyKeyError::new_err(format!("no instrument '{name}'")));
+    }
+    Err(PyValueError::new_err(
+        "expected an instrument handle or a name",
+    ))
+}
+
+/// Resolve a Python object to an instrument id, tolerating names that are not
+/// (yet) in the workspace.
+///
+/// Presets, rules and triggers are declarative data: they are defined up front
+/// and applied later, and [`Preset::plan`] already skips instruments that are
+/// absent. So an unknown name is treated as a stable id rather than an error,
+/// which lets a script declare automation before the instrument is connected.
+fn resolve_instrument_lenient(
+    data: &Arc<Mutex<WorkspaceData>>,
+    obj: &Bound<'_, PyAny>,
+) -> PyResult<InstrumentId> {
+    if let Ok(handle) = obj.extract::<PyRef<'_, WorkspaceInstrument>>() {
+        return Ok(handle.id.clone());
+    }
+    if let Ok(name) = obj.extract::<String>() {
+        let guard = data.lock().unwrap();
+        if let Some(id) = guard.resolve_id(&name) {
+            return Ok(id);
+        }
+        return Ok(InstrumentId::new(&name));
     }
     Err(PyValueError::new_err(
         "expected an instrument handle or a name",

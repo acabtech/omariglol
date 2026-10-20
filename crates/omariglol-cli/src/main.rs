@@ -17,7 +17,7 @@ use std::time::Duration;
 use clap::{Args, Parser, Subcommand};
 
 use omariglol_core::benchmark::{self, BenchmarkOptions, BenchmarkReport};
-use omariglol_core::device::{Device, Target, Transport};
+use omariglol_core::device::{Target, Transport};
 use omariglol_core::discovery_engine::{
     CachedInstrument, DiscoveryEngine, DiscoveryEvent, DiscoveryOptions,
 };
@@ -25,7 +25,7 @@ use omariglol_core::driver::InstrumentDriver;
 use omariglol_core::netconfig;
 use omariglol_core::transport::{self, Session, parse_address, to_hex};
 use omariglol_core::workspace::WorkspaceManager;
-use omariglol_core::{discovery, screenshot};
+use omariglol_core::screenshot;
 use omariglol_script::{ScriptEngine, ScriptEvent, ScriptOptions};
 
 /// Process-wide verbosity, set once from the global `-v` flag.
@@ -105,8 +105,14 @@ pub struct DiscoverArgs {
     pub json: bool,
 
     /// Scan the local subnet with direct SCPI `*IDN?` probes over TCP.
+    ///
+    /// This is the default; the flag is kept for explicitness.
     #[arg(long)]
     pub scan: bool,
+
+    /// Skip the subnet scan and only use broadcast and mDNS.
+    #[arg(long)]
+    pub no_scan: bool,
 
     /// Additional hosts to probe, repeatable (e.g. --host 192.168.1.50).
     #[arg(long = "host", value_name = "ADDRESS")]
@@ -281,29 +287,10 @@ fn main() -> anyhow::Result<()> {
 // ---------------------------------------------------------------------------
 
 fn cmd_discover(args: DiscoverArgs) -> anyhow::Result<()> {
-    // A subnet scan or explicit hosts use the full discovery engine; a plain
-    // broadcast/mDNS run uses the lighter path.
-    if args.scan || !args.hosts.is_empty() {
-        return cmd_discover_scan(args);
-    }
-
-    let timeout = Duration::from_secs(args.timeout);
-    vlog!(
-        1,
-        "discovering instruments (mdns={}, timeout={}s)",
-        args.mdns,
-        args.timeout
-    );
-
-    let devices = discovery::discover(timeout, args.mdns)?;
-    vlog!(1, "found {} instrument(s)", devices.len());
-
-    if args.json {
-        println!("{}", serde_json::to_string_pretty(&devices)?);
-    } else {
-        print_device_table(&devices);
-    }
-    Ok(())
+    // Discovery always runs the full engine: broadcast and mDNS find
+    // self-advertising instruments, and the subnet scan finds the rest. The
+    // strategies run concurrently, so a full scan stays within budget.
+    cmd_discover_scan(args)
 }
 
 /// Run the multi-strategy discovery engine, including a subnet scan.
@@ -332,7 +319,7 @@ fn cmd_discover_scan(args: DiscoverArgs) -> anyhow::Result<()> {
     let options = DiscoveryOptions {
         use_broadcast: true,
         use_mdns: args.mdns,
-        scan_subnet: args.scan,
+        scan_subnet: !args.no_scan,
         extra_hosts,
         ttl_secs: args.ttl,
         incremental: !args.no_incremental,
@@ -397,38 +384,6 @@ fn dash_if_empty(value: &str) -> String {
         "-".to_string()
     } else {
         value.to_string()
-    }
-}
-
-/// Render discovered instruments as an aligned table.
-fn print_device_table(devices: &[Device]) {
-    if devices.is_empty() {
-        println!("No instruments found.");
-        return;
-    }
-
-    let headers = ["ADDRESS", "NAME", "VXI11", "RAW", "METHOD"];
-    let rows: Vec<Vec<String>> = devices
-        .iter()
-        .map(|device| {
-            vec![
-                device.address.to_string(),
-                device.label(),
-                port_or_dash(device.vxi11_port),
-                port_or_dash(device.raw_port),
-                device.method.to_string(),
-            ]
-        })
-        .collect();
-
-    print_table(&headers, &rows);
-}
-
-/// Render an optional port as a string, or `-` when absent.
-fn port_or_dash(port: Option<u16>) -> String {
-    match port {
-        Some(port) => port.to_string(),
-        None => "-".to_string(),
     }
 }
 

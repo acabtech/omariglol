@@ -1,6 +1,6 @@
 [package]
-name = "omariglol-cli"
-description = "Command-line interface for omariglol, feature-parity with lxi-tools"
+name = "riglol-cli"
+description = "Command-line interface for riglol, feature-parity with lxi-tools"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,7 +9,7 @@ authors.workspace = true
 repository.workspace = true
 
 [[bin]]
-name = "omariglol"
+name = "riglol"
 path = "src/main.rs"
 
 [dependencies]

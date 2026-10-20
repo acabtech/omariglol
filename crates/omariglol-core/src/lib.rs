@@ -18,10 +18,11 @@
 //! contracts are in place. The ONC RPC / XDR layer ([`transport::rpc`], M1),
 //! the VXI-11 transport ([`transport::vxi11`], M2), the raw TCP transport
 //! ([`transport::raw`], M3), the shared device model plus [`Session`] wrapper
-//! ([`device`], [`transport`], M4) and discovery ([`discovery`], M5) are
-//! implemented and tested; the screenshot and benchmark layers are still
-//! stubbed with `todo!()`. See `docs/roadmap.md` for the order they are
-//! intended to land in.
+//! ([`device`], [`transport`], M4), discovery ([`discovery`], M5), screenshot
+//! capture ([`screenshot`], M6) and benchmarking ([`benchmark`], M7) are
+//! implemented and tested. The screenshot profile table still needs captured
+//! samples from real hardware. See `docs/roadmap.md` for the order the
+//! milestones are intended to land in.
 //!
 //! ## Design constraints
 //!

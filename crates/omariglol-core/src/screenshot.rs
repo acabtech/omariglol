@@ -5,9 +5,10 @@
 //! generic; the per-vendor commands live in [`PROFILES`] and are selected by
 //! matching the instrument's `*IDN?` response.
 
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::transport::ScpiTransport;
 
 /// Image format of a captured screenshot.
@@ -23,14 +24,37 @@ pub enum ImageFormat {
 impl ImageFormat {
     /// Guess the format from the file's magic bytes.
     pub fn sniff(data: &[u8]) -> ImageFormat {
-        let _ = data;
-        todo!("check PNG/BMP/JPEG magic bytes")
+        const PNG_MAGIC: &[u8] = &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+        if data.starts_with(PNG_MAGIC) {
+            return ImageFormat::Png;
+        }
+        if data.starts_with(b"BM") {
+            return ImageFormat::Bmp;
+        }
+        if data.starts_with(&[0xff, 0xd8, 0xff]) {
+            return ImageFormat::Jpeg;
+        }
+        ImageFormat::Unknown
     }
 
     /// The conventional file extension for this format.
     pub fn extension(&self) -> &'static str {
-        let _ = self;
-        todo!("map format to extension")
+        match self {
+            ImageFormat::Png => "png",
+            ImageFormat::Bmp => "bmp",
+            ImageFormat::Jpeg => "jpg",
+            ImageFormat::Unknown => "bin",
+        }
+    }
+
+    /// The MIME type used in a `data:` URL.
+    pub fn mime(&self) -> &'static str {
+        match self {
+            ImageFormat::Png => "image/png",
+            ImageFormat::Bmp => "image/bmp",
+            ImageFormat::Jpeg => "image/jpeg",
+            ImageFormat::Unknown => "application/octet-stream",
+        }
     }
 }
 
@@ -53,12 +77,70 @@ pub struct ScreenshotProfile {
 ///
 /// Populating this table is the main piece of 0.1.0 work that needs real
 /// hardware; each entry should come with a captured sample.
-pub const PROFILES: &[ScreenshotProfile] = &[];
+pub const PROFILES: &[ScreenshotProfile] = &[
+    ScreenshotProfile {
+        name: "Rigol DS1000Z",
+        idn_prefixes: &[
+            "RIGOL TECHNOLOGIES,DS1",
+            "RIGOL TECHNOLOGIES,MSO1",
+            "RIGOL TECHNOLOGIES,DS1000Z",
+        ],
+        setup: &[":STOP"],
+        command: ":DISP:DATA?",
+        format: ImageFormat::Bmp,
+    },
+    ScreenshotProfile {
+        name: "Rigol DS2000",
+        idn_prefixes: &[
+            "RIGOL TECHNOLOGIES,DS2",
+            "RIGOL TECHNOLOGIES,MSO2",
+            "RIGOL TECHNOLOGIES,DS2000",
+        ],
+        setup: &[":STOP"],
+        command: ":DISP:DATA?",
+        format: ImageFormat::Bmp,
+    },
+    ScreenshotProfile {
+        name: "Rigol DS4000",
+        idn_prefixes: &[
+            "RIGOL TECHNOLOGIES,DS4",
+            "RIGOL TECHNOLOGIES,MSO4",
+            "RIGOL TECHNOLOGIES,DS4000",
+        ],
+        setup: &[":STOP"],
+        command: ":DISP:DATA?",
+        format: ImageFormat::Bmp,
+    },
+    ScreenshotProfile {
+        name: "Keysight InfiniiVision",
+        idn_prefixes: &[
+            "KEYSIGHT TECHNOLOGIES,DSO",
+            "KEYSIGHT TECHNOLOGIES,MSO",
+            "AGILENT TECHNOLOGIES,DSO",
+            "AGILENT TECHNOLOGIES,MSO",
+        ],
+        setup: &[":STOP"],
+        command: ":DISP:DATA? PNG",
+        format: ImageFormat::Png,
+    },
+    ScreenshotProfile {
+        name: "Rohde & Schwarz",
+        idn_prefixes: &["ROHDE&SCHWARZ", "ROHDE & SCHWARZ"],
+        setup: &[":SYST:DISP:UPD OFF"],
+        command: ":HCOP:DEV:LANG PNG;:HCOP:DATA?",
+        format: ImageFormat::Png,
+    },
+];
 
 /// Pick the profile matching an `*IDN?` string.
 pub fn profile_for_idn(idn: &str) -> Option<&'static ScreenshotProfile> {
-    let _ = idn;
-    todo!("match the IDN against the profile prefix table")
+    let upper = idn.trim().to_ascii_uppercase();
+    PROFILES.iter().find(|profile| {
+        profile
+            .idn_prefixes
+            .iter()
+            .any(|prefix| upper.starts_with(prefix))
+    })
 }
 
 /// A captured screenshot.
@@ -78,14 +160,12 @@ pub struct Screenshot {
 impl Screenshot {
     /// Base64 encoding of the image, for the Tauri IPC bridge.
     pub fn to_base64(&self) -> String {
-        let _ = self;
-        todo!("base64-encode the image")
+        base64::engine::general_purpose::STANDARD.encode(&self.data)
     }
 
     /// A `data:` URL suitable for direct embedding in the frontend.
     pub fn to_data_url(&self) -> String {
-        let _ = self;
-        todo!("build a data: URL from the format and bytes")
+        format!("data:{};base64,{}", self.format.mime(), self.to_base64())
     }
 }
 
@@ -98,8 +178,46 @@ pub fn capture(
     idn: &str,
     custom_command: Option<&str>,
 ) -> Result<Screenshot> {
-    let _ = (transport, idn, custom_command);
-    todo!("select a profile, run setup, read the block and parse it")
+    let profile = profile_for_idn(idn);
+
+    let (command, profile_name, expected_format) = match custom_command {
+        Some(cmd) => (cmd, "custom".to_string(), ImageFormat::Unknown),
+        None => match profile {
+            Some(p) => (p.command, p.name.to_string(), p.format),
+            None => {
+                return Err(Error::ScreenshotUnsupported(format!(
+                    "no screenshot profile matches {idn:?}; pass a custom command"
+                )));
+            }
+        },
+    };
+
+    // Run the profile's setup commands, if any. A custom command has no setup.
+    if custom_command.is_none() {
+        if let Some(p) = profile {
+            for setup in p.setup {
+                transport.send(setup)?;
+            }
+        }
+    }
+
+    let raw = transport.query(command)?;
+    let data = parse_ieee_block(&raw).unwrap_or(raw);
+
+    // Prefer what the bytes actually are; fall back to the profile's promise.
+    let sniffed = ImageFormat::sniff(&data);
+    let format = if sniffed == ImageFormat::Unknown {
+        expected_format
+    } else {
+        sniffed
+    };
+
+    Ok(Screenshot {
+        data,
+        format,
+        idn: idn.to_string(),
+        profile: profile_name,
+    })
 }
 
 /// Extract the payload from an IEEE-488.2 definite-length block.
@@ -108,84 +226,275 @@ pub fn capture(
 /// Data that is not a block at all is returned unchanged, so instruments that
 /// reply with a bare image work too.
 pub fn parse_ieee_block(data: &[u8]) -> Option<Vec<u8>> {
-    let _ = data;
-    todo!("parse #<n><len><payload> and #0<payload>")
+    if data.first() != Some(&b'#') {
+        // Not a block: pass the bytes through untouched.
+        return Some(data.to_vec());
+    }
+
+    let digit = *data.get(1)?;
+    if !digit.is_ascii_digit() {
+        // A `#` that is not a block header is malformed.
+        return None;
+    }
+    let n = (digit - b'0') as usize;
+
+    if n == 0 {
+        // Indefinite length: the payload runs to the end, minus a trailing
+        // newline terminator if the instrument added one.
+        let mut payload = data.get(2..)?.to_vec();
+        if payload.last() == Some(&b'\n') {
+            payload.pop();
+            if payload.last() == Some(&b'\r') {
+                payload.pop();
+            }
+        }
+        return Some(payload);
+    }
+
+    let len_start: usize = 2;
+    let len_end = len_start.checked_add(n)?;
+    let len_digits = data.get(len_start..len_end)?;
+    let len_str = std::str::from_utf8(len_digits).ok()?;
+    let len: usize = len_str.parse().ok()?;
+
+    let payload_start = len_end;
+    let payload_end = payload_start.checked_add(len)?;
+    let payload = data.get(payload_start..payload_end)?;
+    Some(payload.to_vec())
 }
 
 /// Total length of the complete IEEE block in `data`, if the header is present.
 ///
 /// Used to know when a streamed image has fully arrived.
 pub(crate) fn declared_block_len(data: &[u8]) -> Option<usize> {
-    let _ = data;
-    todo!("return the declared total block length")
+    if data.first() != Some(&b'#') {
+        return None;
+    }
+    let digit = *data.get(1)?;
+    if !digit.is_ascii_digit() {
+        return None;
+    }
+    let n = (digit - b'0') as usize;
+    if n == 0 {
+        // Indefinite length: no declared total.
+        return None;
+    }
+    let len_start: usize = 2;
+    let len_end = len_start.checked_add(n)?;
+    let len_digits = data.get(len_start..len_end)?;
+    let len_str = std::str::from_utf8(len_digits).ok()?;
+    let len: usize = len_str.parse().ok()?;
+    len_end.checked_add(len)
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::error::Error;
+    use std::collections::VecDeque;
+
+    const PNG: &[u8] = &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01];
+    const BMP: &[u8] = b"BM\x00\x00\x00\x00";
+    const JPEG: &[u8] = &[0xff, 0xd8, 0xff, 0xe0, 0x00];
 
     #[test]
-    #[ignore]
     fn test_image_format_sniff_png() {
-        todo!("check PNG magic bytes")
+        assert_eq!(ImageFormat::sniff(PNG), ImageFormat::Png);
     }
 
     #[test]
-    #[ignore]
     fn test_image_format_sniff_bmp() {
-        todo!("check BMP magic bytes")
+        assert_eq!(ImageFormat::sniff(BMP), ImageFormat::Bmp);
     }
 
     #[test]
-    #[ignore]
     fn test_image_format_sniff_jpeg() {
-        todo!("check JPEG magic bytes")
+        assert_eq!(ImageFormat::sniff(JPEG), ImageFormat::Jpeg);
     }
 
     #[test]
-    #[ignore]
+    fn test_image_format_sniff_unknown() {
+        assert_eq!(ImageFormat::sniff(b"not an image"), ImageFormat::Unknown);
+        assert_eq!(ImageFormat::sniff(&[]), ImageFormat::Unknown);
+    }
+
+    #[test]
     fn test_image_format_extension() {
-        todo!("map format to extension")
+        assert_eq!(ImageFormat::Png.extension(), "png");
+        assert_eq!(ImageFormat::Bmp.extension(), "bmp");
+        assert_eq!(ImageFormat::Jpeg.extension(), "jpg");
+        assert_eq!(ImageFormat::Unknown.extension(), "bin");
     }
 
     #[test]
-    #[ignore]
     fn test_profile_for_idn() {
-        todo!("match the IDN against the profile prefix table")
+        assert_eq!(
+            profile_for_idn("RIGOL TECHNOLOGIES,DS1054Z,DS1ZA123,1.0")
+                .unwrap()
+                .name,
+            "Rigol DS1000Z"
+        );
+        assert_eq!(
+            profile_for_idn("rigol technologies,mso2072a,0,1.0")
+                .unwrap()
+                .name,
+            "Rigol DS2000"
+        );
+        assert_eq!(
+            profile_for_idn("KEYSIGHT TECHNOLOGIES,DSOX1102G,CN123,1.0")
+                .unwrap()
+                .name,
+            "Keysight InfiniiVision"
+        );
+        assert_eq!(
+            profile_for_idn("Rohde&Schwarz,RTB2004,123,1.0")
+                .unwrap()
+                .name,
+            "Rohde & Schwarz"
+        );
+        assert!(profile_for_idn("Some Other Vendor,Model,0,1.0").is_none());
     }
 
     #[test]
-    #[ignore]
     fn test_parse_ieee_block_definite() {
-        todo!("parse #<n><len><payload>")
+        let block = b"#15hello";
+        assert_eq!(parse_ieee_block(block).unwrap(), b"hello");
     }
 
     #[test]
-    #[ignore]
+    fn test_parse_ieee_block_definite_multidigit_len() {
+        let payload = vec![0xabu8; 300];
+        let mut block = b"#3300".to_vec();
+        block.extend_from_slice(&payload);
+        assert_eq!(parse_ieee_block(&block).unwrap(), payload);
+    }
+
+    #[test]
     fn test_parse_ieee_block_indefinite() {
-        todo!("parse #0<payload>")
+        assert_eq!(parse_ieee_block(b"#0hello\n").unwrap(), b"hello");
+        assert_eq!(parse_ieee_block(b"#0hello\r\n").unwrap(), b"hello");
+        assert_eq!(parse_ieee_block(b"#0hello").unwrap(), b"hello");
     }
 
     #[test]
-    #[ignore]
     fn test_parse_ieee_block_non_block_passthrough() {
-        todo!("non-block data is returned unchanged")
+        assert_eq!(parse_ieee_block(b"plain text").unwrap(), b"plain text");
+        assert_eq!(parse_ieee_block(PNG).unwrap(), PNG);
     }
 
     #[test]
-    #[ignore]
+    fn test_parse_ieee_block_truncated_is_none() {
+        // Declares 5 bytes but only 3 follow.
+        assert!(parse_ieee_block(b"#15hel").is_none());
+        // Header cut off before the length digits.
+        assert!(parse_ieee_block(b"#3").is_none());
+        // `#` followed by a non-digit is malformed.
+        assert!(parse_ieee_block(b"#xhello").is_none());
+    }
+
+    #[test]
     fn test_declared_block_len() {
-        todo!("return the declared total block length")
+        assert_eq!(declared_block_len(b"#15hello"), Some(8));
+        // n=3, length digits "300", payload 300 bytes: 2 + 3 + 300.
+        assert_eq!(declared_block_len(b"#3300"), Some(305));
+        // Indefinite blocks have no declared total.
+        assert_eq!(declared_block_len(b"#0hello\n"), None);
+        // Not a block.
+        assert_eq!(declared_block_len(b"plain"), None);
+        // Incomplete header.
+        assert_eq!(declared_block_len(b"#3"), None);
     }
 
     #[test]
-    #[ignore]
     fn test_screenshot_to_base64() {
-        todo!("base64-encode the image")
+        let shot = Screenshot {
+            data: b"hello".to_vec(),
+            format: ImageFormat::Png,
+            idn: "x".to_string(),
+            profile: "custom".to_string(),
+        };
+        assert_eq!(shot.to_base64(), "aGVsbG8=");
     }
 
     #[test]
-    #[ignore]
     fn test_screenshot_to_data_url() {
-        todo!("build a data: URL from the format and bytes")
+        let shot = Screenshot {
+            data: b"hello".to_vec(),
+            format: ImageFormat::Png,
+            idn: "x".to_string(),
+            profile: "custom".to_string(),
+        };
+        assert_eq!(shot.to_data_url(), "data:image/png;base64,aGVsbG8=");
+    }
+
+    /// A transport that replays queued responses and records what was sent.
+    struct MockTransport {
+        sent: Vec<String>,
+        responses: VecDeque<Vec<u8>>,
+    }
+
+    impl MockTransport {
+        fn new(responses: Vec<Vec<u8>>) -> Self {
+            MockTransport {
+                sent: Vec::new(),
+                responses: responses.into_iter().collect(),
+            }
+        }
+    }
+
+    impl ScpiTransport for MockTransport {
+        fn send(&mut self, command: &str) -> Result<()> {
+            self.sent.push(command.to_string());
+            Ok(())
+        }
+
+        fn receive(&mut self) -> Result<Vec<u8>> {
+            self.responses
+                .pop_front()
+                .ok_or_else(|| Error::Other("no response queued".to_string()))
+        }
+
+        fn close(&mut self) -> Result<()> {
+            Ok(())
+        }
+
+        fn description(&self) -> String {
+            "mock".to_string()
+        }
+    }
+
+    #[test]
+    fn test_capture_with_profile() {
+        let mut block = b"#16".to_vec();
+        block.extend_from_slice(BMP);
+        let mut transport = MockTransport::new(vec![block]);
+        let shot = capture(&mut transport, "RIGOL TECHNOLOGIES,DS1054Z,0,1.0", None).unwrap();
+        assert_eq!(shot.profile, "Rigol DS1000Z");
+        assert_eq!(shot.format, ImageFormat::Bmp);
+        assert_eq!(shot.data, BMP);
+        // Setup command then the capture query.
+        assert_eq!(
+            transport.sent,
+            vec![":STOP".to_string(), ":DISP:DATA?".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_capture_with_custom_command() {
+        let mut block = b"#210".to_vec();
+        block.extend_from_slice(PNG);
+        let mut transport = MockTransport::new(vec![block]);
+        let shot = capture(&mut transport, "Unknown Vendor,Model,0,1.0", Some(":FOO?")).unwrap();
+        assert_eq!(shot.profile, "custom");
+        assert_eq!(shot.format, ImageFormat::Png);
+        assert_eq!(shot.data, PNG);
+        assert_eq!(transport.sent, vec![":FOO?".to_string()]);
+    }
+
+    #[test]
+    fn test_capture_unknown_without_custom_errors() {
+        let mut transport = MockTransport::new(vec![]);
+        let err = capture(&mut transport, "Unknown Vendor,Model,0,1.0", None).unwrap_err();
+        assert!(matches!(err, Error::ScreenshotUnsupported(_)));
     }
 }

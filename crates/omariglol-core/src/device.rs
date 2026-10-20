@@ -25,6 +25,8 @@ pub enum DiscoveryMethod {
     Vxi11Broadcast,
     /// mDNS / DNS-SD service browsing (`lxi discover --mdns`).
     Mdns,
+    /// A direct SCPI `*IDN?` probe over TCP on a known or scanned address.
+    ScpiTcp,
     /// Typed in by hand because the instrument is on another subnet.
     Manual,
 }
@@ -34,6 +36,7 @@ impl fmt::Display for DiscoveryMethod {
         let name = match self {
             DiscoveryMethod::Vxi11Broadcast => "vxi11-broadcast",
             DiscoveryMethod::Mdns => "mdns",
+            DiscoveryMethod::ScpiTcp => "scpi-tcp",
             DiscoveryMethod::Manual => "manual",
         };
         f.write_str(name)

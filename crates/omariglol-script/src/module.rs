@@ -32,7 +32,7 @@ fn to_pyerr(err: omariglol_core::Error) -> PyErr {
 
 /// Translate a script error into a Python exception, preserving cancellation
 /// and timeout so the engine can classify them when they surface.
-fn script_err_to_py(err: ScriptError) -> PyErr {
+pub(crate) fn script_err_to_py(err: ScriptError) -> PyErr {
     match err {
         ScriptError::Cancelled => ScriptCancelled::new_err("script cancelled"),
         ScriptError::Timeout(limit) => {
@@ -351,6 +351,8 @@ pub fn omariglol(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(working_dir, m)?)?;
     m.add_class::<Instrument>()?;
     m.add_class::<CsvLogger>()?;
+    // The multi-instrument workspace API (concepts.md §5.2).
+    crate::workspace::register(m)?;
     m.add("__version__", omariglol_core::VERSION)?;
     m.add("ScriptCancelled", m.py().get_type::<ScriptCancelled>())?;
     m.add("ScriptTimeout", m.py().get_type::<ScriptTimeout>())?;

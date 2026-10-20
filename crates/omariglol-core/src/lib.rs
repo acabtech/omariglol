@@ -47,15 +47,43 @@
 #![allow(dead_code)]
 
 pub mod benchmark;
+pub mod connection;
 pub mod device;
 pub mod discovery;
+pub mod discovery_engine;
+pub mod driver;
 pub mod error;
+pub mod instrument;
+pub mod netconfig;
+pub mod preset;
+pub mod rule;
 pub mod screenshot;
+pub mod timeline;
 pub mod transport;
+pub mod trigger;
+pub mod workspace;
 
 pub use device::{Device, DiscoveryMethod, Target, Transport};
 pub use error::{Error, Result};
 pub use transport::{ScpiTransport, Session};
+
+// Multi-instrument platform entities (concepts.md §4).
+pub use connection::Connection;
+pub use driver::{InstrumentDriver, InstrumentType};
+pub use instrument::{Instrument, InstrumentConfig, InstrumentId, InstrumentState};
+pub use preset::{Preset, PresetPlan, PresetStep};
+pub use rule::{Comparison, EvaluationMode, Rule, RuleDecision};
+pub use timeline::{Timeline, TimelineEvent, TimelineEventKind};
+pub use trigger::{Trigger, TriggerError, TriggerState};
+pub use workspace::{Workspace, WorkspaceId, WorkspaceManager, WorkspaceMetadata};
+
+// Discovery subsystem.
+pub use discovery::{ProbeResult, SCPI_PROBE_PORTS};
+pub use discovery_engine::{
+    CachedInstrument, DiscoveryCache, DiscoveryEngine, DiscoveryEvent, DiscoveryOptions,
+    DiscoveryReport,
+};
+pub use netconfig::{InterfaceInfo, NetworkConfig};
 
 /// The crate version, surfaced by the CLI and the About panel.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

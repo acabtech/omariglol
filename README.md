@@ -2,17 +2,12 @@
 
 **A native-to-Omarchy reimplementation of [lxi-tools](https://github.com/lxi-tools/lxi-tools).**
 
-`omariglol` talks to LXI / SCPI test instruments — oscilloscopes, power supplies,
+`omariglol` talks to LXI / SCPI test instruments oscilloscopes, power supplies,
 signal generators, DMMs — over VXI-11 and raw TCP, and presents them through a
 CLI, a themed desktop app, and the Omarchy shell itself.
 
-The name is a portmanteau of *Omarchy* and *Rigol*, but it is vendor-neutral:
+The name is a portmanteau of *Omarchy* and *RigLOL*, but it is vendor-neutral:
 anything that speaks SCPI is fair game.
-
-> **Status: scaffold only.** This repository currently contains the project
-> structure, build configuration, documentation and API contracts. No features
-> are implemented yet — every module is a stub with its intended interface
-> documented. See [`docs/roadmap.md`](docs/roadmap.md).
 
 ---
 
@@ -28,7 +23,7 @@ it. Three things motivated a reimplementation:
    test scripts can use the same ecosystem engineers already automate with.
 3. **It does not know about Omarchy.** `omariglol` reads the live Omarchy
    palette and inherits whatever theme you are running, with zero per-theme
-   code — and it can be triggered from the shell's top bar.
+   code and it can be triggered from the shell's top bar.
 
 ## Architecture
 

@@ -16,6 +16,8 @@ use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
+use serde::{Deserialize, Serialize};
+
 use crate::device::{Device, DiscoveryMethod};
 use crate::error::Result;
 use crate::transport::{rpc, vxi11};
@@ -427,6 +429,130 @@ pub fn merge_devices(mut base: Vec<Device>, extra: Vec<Device>) -> Vec<Device> {
         }
     }
     base
+}
+
+// ---------------------------------------------------------------------------
+// Direct SCPI probing over TCP
+// ---------------------------------------------------------------------------
+
+/// The SCPI raw-socket ports probed by default.
+///
+/// 5025 is the LXI standard; 5555 is Rigol's non-standard raw port. Both are
+/// tried so a Rigol instrument is found without a vendor hint.
+pub const SCPI_PROBE_PORTS: [u16; 2] = [5025, 5555];
+
+/// The default per-host connect/read timeout for a TCP probe.
+pub const PROBE_TIMEOUT: Duration = Duration::from_millis(250);
+
+/// The default number of worker threads a subnet scan uses.
+pub const DEFAULT_SCAN_CONCURRENCY: usize = 64;
+
+/// A host that answered a SCPI `*IDN?` probe.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProbeResult {
+    /// The discovered device.
+    pub device: Device,
+    /// The `*IDN?` string the instrument returned.
+    pub idn: String,
+}
+
+/// Send `*IDN?` to a host:port over TCP and return the response.
+///
+/// Returns `None` on any failure (refused, timed out, empty response), so a
+/// scan over a mostly-empty subnet is cheap and quiet.
+pub fn identify_tcp(address: IpAddr, port: u16, timeout: Duration) -> Option<String> {
+    use std::io::{Read, Write};
+    use std::net::TcpStream;
+
+    let socket_addr = SocketAddr::new(address, port);
+    let mut stream = TcpStream::connect_timeout(&socket_addr, timeout).ok()?;
+    stream.set_read_timeout(Some(timeout)).ok()?;
+    stream.set_write_timeout(Some(timeout)).ok()?;
+    stream.write_all(b"*IDN?\n").ok()?;
+    stream.flush().ok()?;
+
+    let mut buf = [0u8; 512];
+    let n = stream.read(&mut buf).ok()?;
+    if n == 0 {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&buf[..n]).trim().to_string();
+    if text.is_empty() {
+        return None;
+    }
+    Some(text)
+}
+
+/// Probe one host on each candidate port, returning the first that answers.
+pub fn probe_scpi_tcp(
+    address: IpAddr,
+    ports: &[u16],
+    timeout: Duration,
+) -> Option<ProbeResult> {
+    for &port in ports {
+        if let Some(idn) = identify_tcp(address, port, timeout) {
+            let mut device = Device::manual(address);
+            device.method = DiscoveryMethod::ScpiTcp;
+            device.raw_port = Some(port);
+            return Some(ProbeResult { device, idn });
+        }
+    }
+    None
+}
+
+/// Scan a list of hosts in parallel, calling `on_found` as each answers.
+///
+/// `concurrency` worker threads pull hosts from a shared queue, so a `/24`
+/// completes in roughly `hosts / concurrency * timeout` rather than the serial
+/// product. `on_found` is invoked from worker threads and must be `Send + Sync`.
+pub fn scan_hosts(
+    hosts: &[Ipv4Addr],
+    ports: &[u16],
+    timeout: Duration,
+    concurrency: usize,
+    on_found: impl Fn(&ProbeResult) + Send + Sync + 'static,
+) -> Vec<ProbeResult> {
+    use std::collections::VecDeque;
+    use std::sync::{Arc, Mutex};
+    use std::thread;
+
+    if hosts.is_empty() {
+        return Vec::new();
+    }
+
+    let queue = Arc::new(Mutex::new(hosts.iter().copied().collect::<VecDeque<_>>()));
+    let results = Arc::new(Mutex::new(Vec::new()));
+    let on_found = Arc::new(on_found);
+    let ports = ports.to_vec();
+    let workers = concurrency.max(1).min(hosts.len());
+
+    let mut handles = Vec::with_capacity(workers);
+    for _ in 0..workers {
+        let queue = Arc::clone(&queue);
+        let results = Arc::clone(&results);
+        let on_found = Arc::clone(&on_found);
+        let ports = ports.clone();
+        handles.push(thread::spawn(move || {
+            loop {
+                let host = queue.lock().unwrap().pop_front();
+                let Some(host) = host else {
+                    break;
+                };
+                if let Some(result) = probe_scpi_tcp(IpAddr::V4(host), &ports, timeout) {
+                    on_found(&result);
+                    results.lock().unwrap().push(result);
+                }
+            }
+        }));
+    }
+
+    for handle in handles {
+        let _ = handle.join();
+    }
+
+    Arc::try_unwrap(results)
+        .map(|mutex| mutex.into_inner().unwrap())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

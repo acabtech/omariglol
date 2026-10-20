@@ -3,12 +3,13 @@
 //! Instruments supporting the LXI "raw socket" convention listen on TCP 5025
 //! and speak bare SCPI terminated by `\n`, with no RPC framing at all.
 
-use std::net::{SocketAddr, TcpStream};
+use std::io::{ErrorKind, Read, Write};
+use std::net::{Shutdown, SocketAddr, TcpStream};
 use std::time::Duration;
 
 use super::ScpiTransport;
 use crate::device::Target;
-use crate::error::Result;
+use crate::error::{Error, Result};
 
 /// The IANA-assigned LXI raw socket port.
 pub const DEFAULT_RAW_PORT: u16 = 5025;
@@ -16,6 +17,9 @@ pub const DEFAULT_RAW_PORT: u16 = 5025;
 /// Upper bound on a single raw response, so an instrument that never sends a
 /// terminator cannot exhaust memory.
 pub const MAX_RESPONSE: usize = 32 * 1024 * 1024;
+
+/// The SCPI terminator.
+const TERMINATOR: u8 = b'\n';
 
 /// A raw TCP connection to an instrument's SCPI socket.
 pub struct RawTransport {
@@ -28,97 +32,253 @@ pub struct RawTransport {
 
 impl RawTransport {
     pub fn connect(target: &Target) -> Result<Self> {
-        let _ = target;
-        todo!("connect to the raw SCPI port")
+        let port = target.port.unwrap_or(DEFAULT_RAW_PORT);
+        let addr = SocketAddr::new(target.address, port);
+        let stream = TcpStream::connect_timeout(&addr, target.timeout)?;
+        stream.set_read_timeout(Some(target.timeout))?;
+        stream.set_write_timeout(Some(target.timeout))?;
+        Ok(Self {
+            stream,
+            timeout: target.timeout,
+            pending: Vec::new(),
+            addr,
+        })
     }
 
     /// The socket address this transport is connected to.
     pub fn peer(&self) -> SocketAddr {
-        let _ = self;
-        todo!("return the peer address")
+        self.addr
     }
 
     /// Set the read timeout for subsequent reads.
     pub fn set_timeout(&mut self, timeout: Duration) -> Result<()> {
-        let _ = timeout;
-        todo!("apply a new read timeout")
+        self.stream.set_read_timeout(Some(timeout))?;
+        self.timeout = timeout;
+        Ok(())
+    }
+
+    /// Pull one newline-terminated line out of `pending`, if one is buffered.
+    ///
+    /// The terminator (and a preceding `\r`, for CRLF instruments) is stripped.
+    fn take_line(&mut self) -> Option<Vec<u8>> {
+        let pos = self.pending.iter().position(|&b| b == TERMINATOR)?;
+        let mut line: Vec<u8> = self.pending.drain(..=pos).collect();
+        line.pop(); // drop the '\n'
+        if line.last() == Some(&b'\r') {
+            line.pop();
+        }
+        Some(line)
     }
 }
 
 impl ScpiTransport for RawTransport {
     fn send(&mut self, command: &str) -> Result<()> {
-        let _ = command;
-        todo!("write the command with a newline terminator")
+        let mut data = command.as_bytes().to_vec();
+        if data.last() != Some(&TERMINATOR) {
+            data.push(TERMINATOR);
+        }
+        self.stream.write_all(&data)?;
+        self.stream.flush()?;
+        Ok(())
     }
 
     fn receive(&mut self) -> Result<Vec<u8>> {
-        todo!("read until newline, buffering any remainder")
+        // A previous read may already have buffered a complete line.
+        if let Some(line) = self.take_line() {
+            return Ok(line);
+        }
+
+        let mut buf = [0u8; 4096];
+        loop {
+            let n = self.stream.read(&mut buf)?;
+            if n == 0 {
+                // The peer closed. Hand back whatever is buffered, or report
+                // EOF when there is nothing to return.
+                if self.pending.is_empty() {
+                    return Err(Error::Io(std::io::Error::new(
+                        ErrorKind::UnexpectedEof,
+                        "raw socket closed before a response was received",
+                    )));
+                }
+                let mut line = std::mem::take(&mut self.pending);
+                if line.last() == Some(&b'\r') {
+                    line.pop();
+                }
+                return Ok(line);
+            }
+
+            self.pending.extend_from_slice(&buf[..n]);
+            if self.pending.len() > MAX_RESPONSE {
+                return Err(Error::Malformed(format!(
+                    "raw response exceeds MAX_RESPONSE ({} bytes) without a terminator",
+                    MAX_RESPONSE
+                )));
+            }
+            if let Some(line) = self.take_line() {
+                return Ok(line);
+            }
+        }
     }
 
     fn close(&mut self) -> Result<()> {
-        todo!("shut the socket down")
+        // Best effort: the peer may already be gone.
+        let _ = self.stream.shutdown(Shutdown::Both);
+        Ok(())
     }
 
     fn description(&self) -> String {
-        let _ = self;
-        todo!("describe the socket")
+        format!("raw TCP {}", self.addr)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::device::Transport;
+    use std::net::TcpListener;
+    use std::sync::mpsc;
+    use std::thread;
+
+    /// Start a one-shot TCP server on an ephemeral port and run `handler`
+    /// against the first accepted connection.
+    fn spawn_server<F>(handler: F) -> (SocketAddr, thread::JoinHandle<()>)
+    where
+        F: FnOnce(TcpStream) + Send + 'static,
+    {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = thread::spawn(move || {
+            if let Ok((stream, _)) = listener.accept() {
+                handler(stream);
+            }
+        });
+        (addr, handle)
+    }
+
+    fn connect_to(addr: SocketAddr) -> RawTransport {
+        let target = Target {
+            address: addr.ip(),
+            transport: Transport::Raw,
+            port: Some(addr.port()),
+            device_name: "inst0".to_string(),
+            timeout: Duration::from_secs(2),
+        };
+        RawTransport::connect(&target).unwrap()
+    }
 
     #[test]
-    #[ignore]
     fn test_raw_connect() {
-        todo!("connect to the raw SCPI port")
+        let (addr, handle) = spawn_server(|_s| {});
+        let transport = connect_to(addr);
+        assert_eq!(transport.peer(), addr);
+        let _ = handle.join();
     }
 
     #[test]
-    #[ignore]
     fn test_raw_send() {
-        todo!("write the command with a newline terminator")
+        let (tx, rx) = mpsc::channel();
+        let (addr, handle) = spawn_server(move |mut s| {
+            let mut buf = Vec::new();
+            let mut byte = [0u8; 1];
+            while let Ok(n) = s.read(&mut byte) {
+                if n == 0 || byte[0] == TERMINATOR {
+                    break;
+                }
+                buf.push(byte[0]);
+            }
+            let _ = tx.send(buf);
+        });
+        let mut transport = connect_to(addr);
+        transport.send("*IDN?").unwrap();
+        assert_eq!(rx.recv_timeout(Duration::from_secs(2)).unwrap(), b"*IDN?");
+        let _ = handle.join();
     }
 
     #[test]
-    #[ignore]
     fn test_raw_receive() {
-        todo!("read until newline, buffering any remainder")
+        let (addr, handle) = spawn_server(|mut s| {
+            let _ = s.write_all(b"hello\n");
+            let _ = s.flush();
+            thread::sleep(Duration::from_millis(200));
+        });
+        let mut transport = connect_to(addr);
+        assert_eq!(transport.receive().unwrap(), b"hello");
+        let _ = handle.join();
     }
 
     #[test]
-    #[ignore]
     fn test_raw_partial_read() {
-        todo!("handle partial reads")
+        let (addr, handle) = spawn_server(|mut s| {
+            let _ = s.write_all(b"par");
+            let _ = s.flush();
+            thread::sleep(Duration::from_millis(50));
+            let _ = s.write_all(b"tial\n");
+            let _ = s.flush();
+            thread::sleep(Duration::from_millis(200));
+        });
+        let mut transport = connect_to(addr);
+        assert_eq!(transport.receive().unwrap(), b"partial");
+        let _ = handle.join();
     }
 
     #[test]
-    #[ignore]
     fn test_raw_response_split_across_packets() {
-        todo!("handle response split across packets")
+        let (addr, handle) = spawn_server(|mut s| {
+            for chunk in [&b"one "[..], &b"two "[..], &b"three\n"[..]] {
+                let _ = s.write_all(chunk);
+                let _ = s.flush();
+                thread::sleep(Duration::from_millis(30));
+            }
+            thread::sleep(Duration::from_millis(200));
+        });
+        let mut transport = connect_to(addr);
+        assert_eq!(transport.receive().unwrap(), b"one two three");
+        let _ = handle.join();
     }
 
     #[test]
-    #[ignore]
     fn test_raw_response_without_terminator_bounded() {
-        todo!("response without terminator is bounded, not unbounded")
+        let (addr, handle) = spawn_server(|mut s| {
+            let _ = s.write_all(b"x");
+            let _ = s.flush();
+            thread::sleep(Duration::from_millis(200));
+        });
+        let mut transport = connect_to(addr);
+        // Pretend a full response with no terminator is already buffered; the
+        // next byte must trip the MAX_RESPONSE guard rather than grow forever.
+        transport.pending = vec![b'a'; MAX_RESPONSE];
+        let err = transport.receive().unwrap_err();
+        assert!(matches!(err, Error::Malformed(_)));
+        let _ = handle.join();
     }
 
     #[test]
-    #[ignore]
     fn test_raw_bytes_past_terminator_buffered() {
-        todo!("bytes read past the terminator are returned on the next receive")
+        let (addr, handle) = spawn_server(|mut s| {
+            let _ = s.write_all(b"first\nsecond\n");
+            let _ = s.flush();
+            thread::sleep(Duration::from_millis(200));
+        });
+        let mut transport = connect_to(addr);
+        assert_eq!(transport.receive().unwrap(), b"first");
+        assert_eq!(transport.receive().unwrap(), b"second");
+        let _ = handle.join();
     }
 
     #[test]
-    #[ignore]
     fn test_raw_peer() {
-        todo!("return the peer address")
+        let (addr, handle) = spawn_server(|_s| {});
+        let transport = connect_to(addr);
+        assert_eq!(transport.peer(), addr);
+        let _ = handle.join();
     }
 
     #[test]
-    #[ignore]
     fn test_raw_set_timeout() {
-        todo!("apply a new read timeout")
+        let (addr, handle) = spawn_server(|_s| {});
+        let mut transport = connect_to(addr);
+        transport.set_timeout(Duration::from_millis(123)).unwrap();
+        assert_eq!(transport.timeout, Duration::from_millis(123));
+        let _ = handle.join();
     }
 }

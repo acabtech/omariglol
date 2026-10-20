@@ -21,8 +21,8 @@ pub trait ScpiTransport: Send {
 
     /// Write then read — the common SCPI query.
     fn query(&mut self, command: &str) -> Result<Vec<u8>> {
-        let _ = command;
-        todo!("send then receive")
+        self.send(command)?;
+        self.receive()
     }
 
     /// Release the link. Called on drop paths where possible.

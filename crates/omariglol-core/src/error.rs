@@ -61,8 +61,24 @@ impl Error {
 ///
 /// Mirrors the strings liblxi/lxi-tools surface to users.
 pub fn vxi11_error_name(code: i32) -> &'static str {
-    let _ = code;
-    todo!("map Device_ErrorCode to its spec name")
+    match code {
+        0 => "no error",
+        1 => "syntax error",
+        3 => "device not accessible",
+        4 => "invalid link identifier",
+        5 => "parameter error",
+        6 => "channel not established",
+        8 => "operation not supported",
+        9 => "out of resources",
+        11 => "device locked by another link",
+        12 => "no lock held by this link",
+        15 => "I/O timeout",
+        17 => "I/O error",
+        21 => "invalid address",
+        23 => "abort",
+        29 => "channel already established",
+        _ => "unknown error",
+    }
 }
 
 #[cfg(test)]

@@ -10,25 +10,71 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
 
+# ---------------------------------------------------------------------------
+# Self-hosted runners
+#
+# Every job runs on this repo's own runners on `opencode-sam` (Debian 13,
+# rootless Docker) inside the `archlinux:base-devel` image, which is already
+# present in the runner's local Docker image store -- no image is pulled at run
+# time. Arch is both the target platform (Omarchy) and the only distribution
+# that ships a new enough GTK/webkit stack for Tauri 2.
+#
+# The container bind-mounts subdirectories of /home/github-runner/ci-cache on
+# the runner host, so downloaded packages, the Rust toolchain, the crates.io
+# registry, compiled build artifacts and the npm cache all survive between
+# runs:
+#
+#   pacman-pkg -> /var/cache/pacman/pkg   downloaded Arch packages
+#   cargo      -> $CARGO_HOME             crates.io registry + cargo binaries
+#   rustup     -> $RUSTUP_HOME            installed Rust toolchains
+#   targets    -> $CARGO_TARGET_DIR       compiled build artifacts
+#   npm        -> /root/.npm              the npm download cache
+#   locks      -> serialises pacman       so parallel runners cannot corrupt it
+#
+# The first run after a change downloads whatever is missing once; every run
+# after it is served entirely from the runner's own disk.
+# ---------------------------------------------------------------------------
+
 jobs:
   rust:
     name: Rust
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, opencode-sam, omariglol]
+    container:
+      image: archlinux:base-devel
+      volumes:
+        - /home/github-runner/ci-cache/pacman-pkg:/var/cache/pacman/pkg
+        - /home/github-runner/ci-cache/cargo:/ci/cache/cargo
+        - /home/github-runner/ci-cache/rustup:/ci/cache/rustup
+        - /home/github-runner/ci-cache/targets:/ci/cache/targets
+        - /home/github-runner/ci-cache/locks:/ci/cache/locks
+    env:
+      CARGO_HOME: /ci/cache/cargo
+      RUSTUP_HOME: /ci/cache/rustup
+      RUSTUP_TOOLCHAIN: stable
+      CARGO_TARGET_DIR: /ci/cache/targets/${{ github.repository }}/${{ github.job }}
     steps:
+      # The scripting crate embeds CPython, so the interpreter and its headers
+      # have to be present before anything is compiled.
+      - name: Install dependencies (from the local pacman cache)
+        run: |
+          mkdir -p "$CARGO_TARGET_DIR"
+          flock /ci/cache/locks/pacman.lock \
+            pacman -Syu --noconfirm --needed --overwrite '*' git curl python
+
       - uses: actions/checkout@v4
 
-      - name: Install Rust
+      # Build output belongs in the runner's persistent cache, not in the
+      # throw-away checkout.
+      - name: Point target/ at the persistent local cache
+        run: |
+          mkdir -p "$CARGO_TARGET_DIR"
+          rm -rf target
+          ln -s "$CARGO_TARGET_DIR" target
+
+      - name: Install Rust toolchain (reused from RUSTUP_HOME)
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-
-      - uses: Swatinem/rust-cache@v2
-
-      # The scripting crate embeds CPython, so the headers must be present.
-      - name: Install Python development headers
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y python3-dev
 
       - name: Format
         run: cargo fmt --all -- --check
@@ -41,50 +87,60 @@ jobs:
 
   frontend:
     name: Frontend
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, opencode-sam, omariglol]
+    container:
+      image: archlinux:base-devel
+      volumes:
+        - /home/github-runner/ci-cache/pacman-pkg:/var/cache/pacman/pkg
+        - /home/github-runner/ci-cache/npm:/root/.npm
+        - /home/github-runner/ci-cache/locks:/ci/cache/locks
     steps:
+      - name: Install dependencies (from the local pacman cache)
+        run: |
+          flock /ci/cache/locks/pacman.lock \
+            pacman -Syu --noconfirm --needed --overwrite '*' nodejs npm
+
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - run: npm ci
+      - name: Install npm dependencies
+        run: npm ci
 
       # `npm run build` runs tsc first, so this type-checks as well as bundling.
       - name: Type-check and build
         run: npm run build
 
   tauri:
-    name: Tauri (Linux)
-    runs-on: ubuntu-latest
+    name: Tauri (Arch)
+    runs-on: [self-hosted, opencode-sam, omariglol]
+    container:
+      image: archlinux:base-devel
+      volumes:
+        - /home/github-runner/ci-cache/pacman-pkg:/var/cache/pacman/pkg
+        - /home/github-runner/ci-cache/cargo:/ci/cache/cargo
+        - /home/github-runner/ci-cache/rustup:/ci/cache/rustup
+        - /home/github-runner/ci-cache/targets:/ci/cache/targets
+        - /home/github-runner/ci-cache/locks:/ci/cache/locks
+    env:
+      CARGO_HOME: /ci/cache/cargo
+      RUSTUP_HOME: /ci/cache/rustup
+      RUSTUP_TOOLCHAIN: stable
+      CARGO_TARGET_DIR: /ci/cache/targets/${{ github.repository }}/${{ github.job }}
     steps:
+      # webkit2gtk-4.1, libsoup3 and GTK 3 are the Tauri Linux prerequisites
+      # documented in CONTRIBUTING.md; python is needed by omariglol-script.
+      - name: Install dependencies (from the local pacman cache)
+        run: |
+          mkdir -p "$CARGO_TARGET_DIR"
+          flock /ci/cache/locks/pacman.lock \
+            pacman -Syu --noconfirm --needed --overwrite '*' \
+              git curl python webkit2gtk-4.1 gtk3 libsoup3 librsvg patchelf
+
       - uses: actions/checkout@v4
 
-      - name: Install Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            python3-dev
-
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - run: npm ci
+      - name: Install Rust toolchain (reused from RUSTUP_HOME)
+        uses: dtolnay/rust-toolchain@stable
 
       # Compiles the Tauri backend without producing installers.
       - name: Check the Tauri backend
         working-directory: src-tauri
-        run: cargo check --locked || cargo check
+        run: cargo check --locked

@@ -90,6 +90,14 @@ impl Session {
         self.transport.description()
     }
 
+    /// Borrow the underlying transport.
+    ///
+    /// Needed by operations that work directly on the transport rather than
+    /// through the text helpers — benchmarking and screenshot capture.
+    pub fn transport_mut(&mut self) -> &mut dyn ScpiTransport {
+        self.transport.as_mut()
+    }
+
     /// Adjust the socket timeout for subsequent operations.
     pub fn set_timeout(&mut self, timeout: Duration) -> Result<()> {
         self.transport.set_timeout(timeout)

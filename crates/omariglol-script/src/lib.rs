@@ -235,6 +235,14 @@ impl ScriptEngine {
     pub fn cancel(&self) {
         self.cancel.store(true, Ordering::Relaxed);
     }
+
+    /// A cloneable handle that can request cancellation from another thread.
+    ///
+    /// The GUI holds this so `cancel_script` can stop a run without waiting for
+    /// the engine lock, which the running script holds for its whole duration.
+    pub fn cancel_handle(&self) -> Arc<AtomicBool> {
+        self.cancel.clone()
+    }
 }
 
 impl Default for ScriptEngine {

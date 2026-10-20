@@ -408,7 +408,10 @@ fn merge_into(base: &mut Device, other: &Device) {
 }
 
 /// Merge two device lists by IP address, preferring the richer record.
-fn merge_devices(mut base: Vec<Device>, extra: Vec<Device>) -> Vec<Device> {
+///
+/// Public so a frontend can run the two discovery mechanisms separately and
+/// emit results incrementally, then merge them the same way [`discover`] does.
+pub fn merge_devices(mut base: Vec<Device>, extra: Vec<Device>) -> Vec<Device> {
     for device in extra {
         match base.iter_mut().find(|d| d.address == device.address) {
             Some(existing) => {

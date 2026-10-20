@@ -12,6 +12,9 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        // One active session and one embedded Python engine, shared by every
+        // command. Cloning the state is cheap, so background tasks get a copy.
+        .manage(commands::AppState::new())
         .invoke_handler(tauri::generate_handler![
             commands::version,
             commands::discover,

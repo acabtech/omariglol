@@ -17,6 +17,12 @@ export interface Device {
   method: DiscoveryMethod;
 }
 
+/** One benchmark progress sample, emitted as `benchmark:sample`. */
+export interface BenchmarkSample {
+  iteration: number;
+  sample_ms: number;
+}
+
 /** Statistics from one benchmark run. Mirrors `BenchmarkReport` in Rust. */
 export interface BenchmarkReport {
   command: string;

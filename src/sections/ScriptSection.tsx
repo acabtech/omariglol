@@ -1,10 +1,10 @@
 /**
- * Script section — write and run a Python measurement script
- * (UX journey §4.5, §6.5).
+ * Script panel (UX journey §4.5, §6.5; concepts.md §5.2).
  *
- * A Python editor, a streaming output console and live charts. `print()`
- * output, `sample` events and `status` events all arrive as `script:event`
- * events, so the console and charts update while the script runs.
+ * A Python editor, a streaming output console and live charts. Scripts can use
+ * the single-instrument `connect()` API or the multi-instrument `Workspace`
+ * API. `print()` output, `sample` events and `status` events all arrive as
+ * `script:event` events, so the console and charts update while the script runs.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -17,19 +17,27 @@ import * as api from "@/lib/api";
 import { toCommandError } from "@/lib/api";
 import { translateError } from "@/lib/errors";
 import { fileTimestamp } from "@/lib/format";
-import type { CommandError, ScriptEvent, SectionProps } from "@/lib/types";
-import { useSession } from "@/state/session";
+import type { CommandError, PanelProps, ScriptEvent } from "@/lib/types";
+import { useWorkspace } from "@/state/workspace";
 
-const DEFAULT_SOURCE = `from omariglol import connect
+const DEFAULT_SOURCE = `from omariglol import Workspace
 
-with connect("192.168.1.50") as inst:
-    print(inst.idn())
+# Open a saved workspace and address its instruments by name.
+ws = Workspace.open("my-workspace")
+scope = ws.instruments["Rigol DS1054Z"]
+
+print(scope.query("*IDN?"))
+
+with ws.run("demo") as run:
+    scope.write(":RUN")
+    run.wait(scope, "*OPC?")
+    run.record(frequency=float(scope.query(":MEAS:FREQ?")))
 `;
 
 const CHART_TYPES: ChartType[] = ["line", "scatter", "gauge"];
 
-export default function ScriptSection({ onGoToConnection }: SectionProps) {
-  const { session } = useSession();
+export default function ScriptSection({ onGoToTopology }: PanelProps) {
+  const { instruments, refreshTimeline } = useWorkspace();
 
   const [source, setSource] = useState(DEFAULT_SOURCE);
   const [lines, setLines] = useState<ConsoleLine[]>([]);
@@ -89,6 +97,7 @@ export default function ScriptSection({ onGoToConnection }: SectionProps) {
     try {
       await api.runScript(source);
       setExitStatus("exited with code 0");
+      await refreshTimeline();
     } catch (err) {
       const commandError = toCommandError(err);
       if (commandError.kind === "cancelled") {
@@ -100,7 +109,7 @@ export default function ScriptSection({ onGoToConnection }: SectionProps) {
     } finally {
       setRunning(false);
     }
-  }, [source]);
+  }, [source, refreshTimeline]);
 
   const cancel = useCallback(async () => {
     try {
@@ -136,7 +145,6 @@ export default function ScriptSection({ onGoToConnection }: SectionProps) {
       } catch (err) {
         setError(toCommandError(err));
       } finally {
-        // Allow re-opening the same file.
         event.target.value = "";
       }
     },
@@ -182,16 +190,16 @@ export default function ScriptSection({ onGoToConnection }: SectionProps) {
         </>
       }
     >
-      {!session && (
+      {instruments.length === 0 && (
         <Alert tone="info">
-          No instrument connected. Scripts can open their own connection with{" "}
-          <code>omariglol.connect()</code>, or{" "}
+          No instruments in this workspace. Scripts can open their own
+          connection with <code>omariglol.connect()</code>, or{" "}
           <button
             type="button"
             className="link-button"
-            onClick={onGoToConnection}
+            onClick={onGoToTopology}
           >
-            connect an instrument
+            add an instrument
           </button>
           .
         </Alert>

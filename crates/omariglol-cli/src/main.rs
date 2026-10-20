@@ -9,6 +9,7 @@
 //! embedded Python engine in `omariglol-script` (M9).
 
 use std::io::{BufRead, Write};
+use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
@@ -17,7 +18,13 @@ use clap::{Args, Parser, Subcommand};
 
 use omariglol_core::benchmark::{self, BenchmarkOptions, BenchmarkReport};
 use omariglol_core::device::{Device, Target, Transport};
+use omariglol_core::discovery_engine::{
+    CachedInstrument, DiscoveryEngine, DiscoveryEvent, DiscoveryOptions,
+};
+use omariglol_core::driver::InstrumentDriver;
+use omariglol_core::netconfig;
 use omariglol_core::transport::{self, Session, parse_address, to_hex};
+use omariglol_core::workspace::WorkspaceManager;
 use omariglol_core::{discovery, screenshot};
 use omariglol_script::{ScriptEngine, ScriptEvent, ScriptOptions};
 
@@ -75,6 +82,12 @@ pub enum Command {
 
     /// Run a Python measurement script.
     Run(RunArgs),
+
+    /// Show the driver (command surface) for an instrument.
+    Driver(DriverArgs),
+
+    /// Manage saved workspaces.
+    Workspace(WorkspaceArgs),
 }
 
 #[derive(Debug, Args)]
@@ -90,6 +103,71 @@ pub struct DiscoverArgs {
     /// Emit JSON instead of a table, for scripting.
     #[arg(long)]
     pub json: bool,
+
+    /// Scan the local subnet with direct SCPI `*IDN?` probes over TCP.
+    #[arg(long)]
+    pub scan: bool,
+
+    /// Additional hosts to probe, repeatable (e.g. --host 192.168.1.50).
+    #[arg(long = "host", value_name = "ADDRESS")]
+    pub hosts: Vec<String>,
+
+    /// Cache TTL in seconds.
+    #[arg(long, default_value_t = 300, value_name = "SECONDS")]
+    pub ttl: u64,
+
+    /// Probe every host, ignoring the cache.
+    #[arg(long)]
+    pub no_incremental: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct DriverArgs {
+    /// Instrument address.
+    #[arg(value_name = "ADDRESS")]
+    pub address: String,
+
+    /// Use the raw TCP socket instead of VXI-11.
+    #[arg(long)]
+    pub raw: bool,
+
+    /// Override the port.
+    #[arg(long, value_name = "PORT")]
+    pub port: Option<u16>,
+
+    /// Socket timeout in seconds.
+    #[arg(long, default_value_t = 3, value_name = "SECONDS")]
+    pub timeout: u64,
+
+    /// Emit JSON instead of a table.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct WorkspaceArgs {
+    #[command(subcommand)]
+    pub command: WorkspaceCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum WorkspaceCommand {
+    /// List saved workspaces.
+    List,
+
+    /// Create a new workspace.
+    Create {
+        /// The workspace name.
+        #[arg(value_name = "NAME")]
+        name: String,
+    },
+
+    /// Show a workspace's instruments and artifacts.
+    Show {
+        /// The workspace name or id.
+        #[arg(value_name = "NAME")]
+        name: String,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -193,6 +271,8 @@ fn main() -> anyhow::Result<()> {
         Command::Screenshot(args) => cmd_screenshot(args),
         Command::Benchmark(args) => cmd_benchmark(args),
         Command::Run(args) => cmd_run(args),
+        Command::Driver(args) => cmd_driver(args),
+        Command::Workspace(args) => cmd_workspace(args),
     }
 }
 
@@ -201,6 +281,12 @@ fn main() -> anyhow::Result<()> {
 // ---------------------------------------------------------------------------
 
 fn cmd_discover(args: DiscoverArgs) -> anyhow::Result<()> {
+    // A subnet scan or explicit hosts use the full discovery engine; a plain
+    // broadcast/mDNS run uses the lighter path.
+    if args.scan || !args.hosts.is_empty() {
+        return cmd_discover_scan(args);
+    }
+
     let timeout = Duration::from_secs(args.timeout);
     vlog!(
         1,
@@ -218,6 +304,100 @@ fn cmd_discover(args: DiscoverArgs) -> anyhow::Result<()> {
         print_device_table(&devices);
     }
     Ok(())
+}
+
+/// Run the multi-strategy discovery engine, including a subnet scan.
+fn cmd_discover_scan(args: DiscoverArgs) -> anyhow::Result<()> {
+    let config = netconfig::detect();
+    match &config.primary {
+        Some(interface) => vlog!(
+            1,
+            "network: {}/{} on {}{}",
+            interface.address,
+            interface.prefix_len,
+            interface.name,
+            interface
+                .vlan
+                .map(|vlan| format!(" (vlan {vlan})"))
+                .unwrap_or_default()
+        ),
+        None => vlog!(1, "network: offline"),
+    }
+
+    let extra_hosts: Vec<IpAddr> = args
+        .hosts
+        .iter()
+        .filter_map(|host| host.parse().ok())
+        .collect();
+    let options = DiscoveryOptions {
+        use_broadcast: true,
+        use_mdns: args.mdns,
+        scan_subnet: args.scan,
+        extra_hosts,
+        ttl_secs: args.ttl,
+        incremental: !args.no_incremental,
+        listen_timeout: Duration::from_secs(args.timeout),
+        ..Default::default()
+    };
+
+    let engine = DiscoveryEngine::new(args.ttl);
+    let report = engine.run(&options, |event| {
+        if verbosity() >= 1
+            && let DiscoveryEvent::InstrumentFound { instrument } = event
+        {
+            eprintln!("  found {} at {}", instrument.model, instrument.address());
+        }
+    });
+
+    vlog!(
+        1,
+        "probed {} host(s), skipped {}, found {} in {:.0} ms",
+        report.probed_hosts,
+        report.skipped_hosts,
+        report.found.len(),
+        report.elapsed_ms
+    );
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        print_cached_table(&report.found);
+    }
+    Ok(())
+}
+
+/// Render cached discovery results as an aligned table.
+fn print_cached_table(instruments: &[CachedInstrument]) {
+    if instruments.is_empty() {
+        println!("No instruments found.");
+        return;
+    }
+    let headers = ["ADDRESS", "MODEL", "SERIAL", "VLAN", "METHOD"];
+    let rows: Vec<Vec<String>> = instruments
+        .iter()
+        .map(|instrument| {
+            vec![
+                instrument.address().to_string(),
+                dash_if_empty(&instrument.model),
+                dash_if_empty(&instrument.serial),
+                instrument
+                    .vlan
+                    .map(|vlan| vlan.to_string())
+                    .unwrap_or_else(|| "-".to_string()),
+                instrument.device.method.to_string(),
+            ]
+        })
+        .collect();
+    print_table(&headers, &rows);
+}
+
+/// Render a string, or `-` when it is empty.
+fn dash_if_empty(value: &str) -> String {
+    if value.is_empty() {
+        "-".to_string()
+    } else {
+        value.to_string()
+    }
 }
 
 /// Render discovered instruments as an aligned table.
@@ -535,6 +715,124 @@ fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
     if let Some(code) = result.exit_code {
         if code != 0 {
             std::process::exit(code);
+        }
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// driver
+// ---------------------------------------------------------------------------
+
+fn cmd_driver(args: DriverArgs) -> anyhow::Result<()> {
+    let mut session = open_session(&args.address, args.raw, args.port, args.timeout)?;
+    let idn = session.identify()?;
+    let driver = InstrumentDriver::from_idn(&idn);
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&driver)?);
+        return Ok(());
+    }
+
+    println!("instrument: {idn}");
+    println!("type:       {}", driver.instrument_type.label());
+    if let Some(profile) = &driver.profile {
+        println!("profile:    {profile}");
+    }
+    if let Some(screenshot) = &driver.screenshot_profile {
+        println!("screenshot: {screenshot}");
+    }
+    println!();
+
+    let rows: Vec<Vec<String>> = driver
+        .commands
+        .iter()
+        .map(|command| {
+            vec![
+                command.group.clone(),
+                command.name.clone(),
+                command.scpi.clone(),
+                if command.query { "query" } else { "write" }.to_string(),
+                command.description.clone(),
+            ]
+        })
+        .collect();
+    print_table(&["GROUP", "NAME", "SCPI", "KIND", "DESCRIPTION"], &rows);
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// workspace
+// ---------------------------------------------------------------------------
+
+/// The directory workspaces are persisted to, matching the desktop app.
+fn workspace_dir() -> PathBuf {
+    if let Ok(home) = std::env::var("HOME") {
+        return PathBuf::from(home)
+            .join(".config")
+            .join("omariglol")
+            .join("workspaces");
+    }
+    PathBuf::from("omariglol-workspaces")
+}
+
+fn cmd_workspace(args: WorkspaceArgs) -> anyhow::Result<()> {
+    let dir = workspace_dir();
+    let mut manager = WorkspaceManager::with_dir(&dir);
+    manager.load_all()?;
+
+    match args.command {
+        WorkspaceCommand::List => {
+            if manager.list().is_empty() {
+                println!("No workspaces in {}.", dir.display());
+                return Ok(());
+            }
+            let rows: Vec<Vec<String>> = manager
+                .list()
+                .iter()
+                .map(|workspace| {
+                    vec![
+                        workspace.id.to_string(),
+                        workspace.name.clone(),
+                        workspace.instruments.len().to_string(),
+                        workspace.connected_count().to_string(),
+                    ]
+                })
+                .collect();
+            print_table(&["ID", "NAME", "INSTRUMENTS", "CONNECTED"], &rows);
+        }
+        WorkspaceCommand::Create { name } => {
+            let id = manager.create(name);
+            manager.save(&id)?;
+            println!("created {id} in {}", dir.display());
+        }
+        WorkspaceCommand::Show { name } => {
+            let workspace = manager
+                .list()
+                .iter()
+                .find(|workspace| workspace.name == name || workspace.id.as_str() == name)
+                .ok_or_else(|| anyhow::anyhow!("no workspace '{name}' in {}", dir.display()))?;
+            println!("workspace: {} ({})", workspace.name, workspace.id);
+            println!("instruments: {}", workspace.instruments.len());
+            if !workspace.instruments.is_empty() {
+                let rows: Vec<Vec<String>> = workspace
+                    .instruments
+                    .iter()
+                    .map(|instrument| {
+                        vec![
+                            instrument.id.to_string(),
+                            instrument.label(),
+                            instrument.state.to_string(),
+                            instrument.idn.clone().unwrap_or_else(|| "-".to_string()),
+                        ]
+                    })
+                    .collect();
+                print_table(&["ID", "LABEL", "STATE", "IDN"], &rows);
+            }
+            println!("presets: {}", workspace.presets.len());
+            println!("rules: {}", workspace.rules.len());
+            println!("triggers: {}", workspace.triggers.len());
+            println!("timeline events: {}", workspace.timeline.len());
         }
     }
     Ok(())

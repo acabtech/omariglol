@@ -1,73 +1,78 @@
 /**
- * The workbench sidebar.
+ * The workbench sidebar (concepts.md §2.2).
  *
- * A persistent session card plus section navigation. It is a jump list, not a
- * tab bar: every section is already visible in the scroll, and clicking a link
- * simply scrolls to it.
+ * The topology view is the central navigation surface and lives here: the
+ * active workspace, its instruments grouped by transport, and their trigger
+ * dependencies. Below it is the panel jump list — a jump list, not a tab bar,
+ * since every panel is already visible in the scroll.
  */
 
-import { Button } from "@/components/ui";
+import { TopologyView } from "@/components/TopologyView";
 import { cx } from "@/lib/cx";
-import { SECTIONS } from "@/lib/types";
-import { useSession } from "@/state/session";
+import { PANELS } from "@/lib/types";
+import { useWorkspace } from "@/state/workspace";
 
 export interface SidebarProps {
-  /** The section currently in view, from the scroll-spy. */
-  activeSection: string | null;
-  /** Scroll to a section by id. */
+  /** The panel currently in view, from the scroll-spy. */
+  activePanel: string | null;
+  /** Scroll to a panel by id. */
   onNavigate: (id: string) => void;
 }
 
-export function Sidebar({ activeSection, onNavigate }: SidebarProps) {
-  const { session, connecting, disconnect } = useSession();
+export function Sidebar({ activePanel, onNavigate }: SidebarProps) {
+  const {
+    workspace,
+    instruments,
+    selectedId,
+    select,
+    loading,
+  } = useWorkspace();
 
   return (
     <aside className="sidebar">
       <div className="sidebar__block">
-        <h2 className="sidebar__heading">Session</h2>
-        {session ? (
-          <div className="session-card">
-            <p className="session-card__idn mono" title={session.idn}>
-              {session.idn}
+        <h2 className="sidebar__heading">Workspace</h2>
+        {workspace ? (
+          <div className="workspace-card">
+            <p className="workspace-card__name" title={workspace.name}>
+              {workspace.name}
             </p>
-            <dl className="session-card__meta">
-              <div className="session-card__row">
-                <dt>Address</dt>
-                <dd className="mono">{session.address}</dd>
-              </div>
-              <div className="session-card__row">
-                <dt>Transport</dt>
-                <dd className="mono">
-                  {session.transport}
-                  {session.port != null ? `:${session.port}` : ""}
-                </dd>
-              </div>
-            </dl>
-            <Button variant="danger" onClick={() => void disconnect()}>
-              Disconnect
-            </Button>
+            <p className="workspace-card__meta">
+              {workspace.instruments.length} instruments ·{" "}
+              {workspace.timeline_len} events
+            </p>
           </div>
         ) : (
           <p className="sidebar__empty">
-            {connecting ? "Connecting…" : "No instrument connected."}
+            {loading ? "Loading…" : "No workspace."}
           </p>
         )}
       </div>
 
-      <nav className="sidebar__block" aria-label="Sections">
-        <h2 className="sidebar__heading">Sections</h2>
+      <div className="sidebar__block">
+        <h2 className="sidebar__heading">Topology</h2>
+        <TopologyView
+          instruments={instruments}
+          triggers={workspace?.triggers ?? []}
+          selectedId={selectedId}
+          onSelect={select}
+        />
+      </div>
+
+      <nav className="sidebar__block" aria-label="Panels">
+        <h2 className="sidebar__heading">Panels</h2>
         <ul className="sidebar__nav">
-          {SECTIONS.map((section, index) => {
-            const isActive = activeSection === section.id;
+          {PANELS.map((panel, index) => {
+            const isActive = activePanel === panel.id;
             return (
-              <li key={section.id}>
+              <li key={panel.id}>
                 <button
                   type="button"
                   className={cx("sidebar__link", isActive && "is-active")}
                   aria-current={isActive ? "true" : undefined}
-                  onClick={() => onNavigate(section.id)}
+                  onClick={() => onNavigate(panel.id)}
                 >
-                  <span className="sidebar__link-label">{section.label}</span>
+                  <span className="sidebar__link-label">{panel.label}</span>
                   <span className="sidebar__link-hint" aria-hidden="true">
                     {index + 1}
                   </span>

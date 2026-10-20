@@ -1,10 +1,8 @@
 /**
- * Benchmark section — measure SCPI round-trip performance
- * (UX journey §4.4, §6.4).
+ * Benchmark panel (UX journey §4.4, §6.4).
  *
- * Samples stream in via `benchmark:sample` events so the run is drawn live.
- * The backend has no cancellation command, so Cancel stops the UI from
- * tracking further samples and reports the metrics gathered so far as partial.
+ * Measures SCPI round-trip performance for the selected instrument. Samples
+ * stream in via `benchmark:sample` events so the run is drawn live.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -28,9 +26,9 @@ import type {
   BenchmarkReport,
   BenchmarkSample,
   CommandError,
-  SectionProps,
+  PanelProps,
 } from "@/lib/types";
-import { useSession } from "@/state/session";
+import { useWorkspace } from "@/state/workspace";
 
 /** Client-side statistics, used for the partial view after a cancel. */
 interface PartialStats {
@@ -65,10 +63,9 @@ function summarise(values: number[]): PartialStats | null {
   };
 }
 
-export default function BenchmarkSection({
-  onGoToConnection,
-}: SectionProps) {
-  const { session } = useSession();
+export default function BenchmarkSection({ onGoToTopology }: PanelProps) {
+  const { selected, refreshTimeline } = useWorkspace();
+  const connected = selected?.state === "connected";
 
   const [command, setCommand] = useState("*IDN?");
   const [iterations, setIterations] = useState(25);
@@ -99,6 +96,7 @@ export default function BenchmarkSection({
   }, []);
 
   const run = useCallback(async () => {
+    if (!selected) return;
     setSamples([]);
     setReport(null);
     setCancelled(false);
@@ -107,15 +105,16 @@ export default function BenchmarkSection({
     runningRef.current = true;
     setRunning(true);
     try {
-      const result = await api.runBenchmark(command, iterations);
+      const result = await api.runBenchmark(command, iterations, selected.id);
       setReport(result);
+      await refreshTimeline();
     } catch (err) {
       setError(toCommandError(err));
     } finally {
       runningRef.current = false;
       setRunning(false);
     }
-  }, [command, iterations]);
+  }, [command, iterations, selected, refreshTimeline]);
 
   const cancel = useCallback(() => {
     cancelledRef.current = true;
@@ -147,20 +146,28 @@ export default function BenchmarkSection({
     <Section
       id="benchmark"
       title="Benchmark"
-      description="Measure SCPI round-trip performance."
+      description={
+        selected
+          ? `Measure ${selected.label}'s SCPI round-trip performance.`
+          : "Measure SCPI round-trip performance."
+      }
       actions={
         running ? (
           <Button variant="danger" onClick={cancel}>
             Cancel
           </Button>
         ) : (
-          <Button variant="primary" disabled={!session} onClick={() => void run()}>
+          <Button
+            variant="primary"
+            disabled={!connected}
+            onClick={() => void run()}
+          >
             Run
           </Button>
         )
       }
     >
-      {session ? (
+      {connected ? (
         <>
           <div className="form-grid">
             <Field label="Command" htmlFor="benchmark-command">
@@ -241,7 +248,7 @@ export default function BenchmarkSection({
           )}
         </>
       ) : (
-        <ConnectPrompt onGoToConnection={onGoToConnection} />
+        <ConnectPrompt onGoToConnection={onGoToTopology} />
       )}
     </Section>
   );

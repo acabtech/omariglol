@@ -1,9 +1,9 @@
 /**
- * SCPI section — a command console (UX journey §4.2, §6.2).
+ * SCPI console (UX journey §4.2, §6.2; concepts.md §2.5).
  *
- * A single input line by default, with history recall and a hex toggle for
- * binary responses. Commands ending in `?` are queries; everything else is a
- * write.
+ * A command console bound to the selected instrument. Commands ending in `?`
+ * are queries; everything else is a write. History recall and a hex toggle for
+ * binary responses are preserved from 0.1.0.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -16,11 +16,12 @@ import * as api from "@/lib/api";
 import { toCommandError } from "@/lib/api";
 import { translateError } from "@/lib/errors";
 import { byteLength, hasNonPrintable, toHexDump } from "@/lib/format";
-import type { SectionProps } from "@/lib/types";
-import { useSession } from "@/state/session";
+import type { PanelProps } from "@/lib/types";
+import { useWorkspace } from "@/state/workspace";
 
-export default function ScpiSection({ onGoToConnection }: SectionProps) {
-  const { session } = useSession();
+export default function ScpiSection({ onGoToTopology }: PanelProps) {
+  const { selected, refreshTimeline } = useWorkspace();
+  const connected = selected?.state === "connected";
 
   const [lines, setLines] = useState<ConsoleLine[]>([]);
   const [input, setInput] = useState("");
@@ -48,9 +49,14 @@ export default function ScpiSection({ onGoToConnection }: SectionProps) {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
+  // A new instrument invalidates the console.
+  useEffect(() => {
+    setLines([]);
+  }, [selected?.id]);
+
   const send = useCallback(async () => {
     const command = input.trim();
-    if (!command || sending) return;
+    if (!command || sending || !selected) return;
 
     pushLine(`> ${command}`, "echo");
     setInput("");
@@ -60,7 +66,7 @@ export default function ScpiSection({ onGoToConnection }: SectionProps) {
 
     try {
       if (command.endsWith("?")) {
-        const response = await api.scpiQuery(command);
+        const response = await api.instrumentQuery(selected.id, command);
         if (hex) {
           pushLine(toHexDump(response));
         } else if (hasNonPrintable(response)) {
@@ -72,17 +78,17 @@ export default function ScpiSection({ onGoToConnection }: SectionProps) {
           pushLine(response);
         }
       } else {
-        await api.scpiWrite(command);
+        await api.instrumentWrite(selected.id, command);
       }
+      await refreshTimeline();
     } catch (err) {
       const translated = translateError(toCommandError(err));
       pushLine(`error: ${translated.message}`, "error");
     } finally {
       setSending(false);
-      // Focus returns to the input after send (§6.2).
       inputRef.current?.focus();
     }
-  }, [hex, input, pushLine, sending]);
+  }, [hex, input, pushLine, selected, sending, refreshTimeline]);
 
   const navigateHistory = useCallback(
     (delta: number) => {
@@ -117,14 +123,18 @@ export default function ScpiSection({ onGoToConnection }: SectionProps) {
     <Section
       id="scpi"
       title="SCPI Console"
-      description="Send commands and read responses."
+      description={
+        selected
+          ? `Send commands to ${selected.label} and read responses.`
+          : "Send commands and read responses."
+      }
       actions={
         <Button onClick={() => setLines([])} disabled={lines.length === 0}>
           Clear
         </Button>
       }
     >
-      {session ? (
+      {connected ? (
         <>
           <Console
             lines={lines}
@@ -159,7 +169,7 @@ export default function ScpiSection({ onGoToConnection }: SectionProps) {
           </div>
         </>
       ) : (
-        <ConnectPrompt onGoToConnection={onGoToConnection} />
+        <ConnectPrompt onGoToConnection={onGoToTopology} />
       )}
     </Section>
   );

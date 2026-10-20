@@ -1,10 +1,9 @@
 /**
- * Screenshot section — capture and display the instrument's screen
- * (UX journey §4.3, §6.3).
+ * Screenshot panel (UX journey §4.3, §6.3).
  *
- * The profile is matched from the session's `*IDN?` so the user sees what will
- * be captured before they capture. An unknown instrument reveals a manual
- * command override.
+ * Captures the selected instrument's display. The profile is matched from the
+ * instrument's `*IDN?` so the user sees what will be captured before they
+ * capture; an unknown instrument reveals a manual command override.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -17,8 +16,8 @@ import * as api from "@/lib/api";
 import { translateError } from "@/lib/errors";
 import { fileTimestamp, idnLabel } from "@/lib/format";
 import { matchProfile } from "@/lib/profiles";
-import type { Screenshot, SectionProps } from "@/lib/types";
-import { useSession } from "@/state/session";
+import type { PanelProps, Screenshot } from "@/lib/types";
+import { useWorkspace } from "@/state/workspace";
 
 const MIME: Record<Screenshot["format"], string> = {
   png: "image/png",
@@ -45,21 +44,24 @@ function saveScreenshot(shot: Screenshot): void {
   anchor.remove();
 }
 
-export default function ScreenshotSection({
-  onGoToConnection,
-}: SectionProps) {
-  const { session } = useSession();
+export default function ScreenshotSection({ onGoToTopology }: PanelProps) {
+  const { selected, refreshTimeline } = useWorkspace();
+  const connected = selected?.state === "connected";
 
   const profile = useMemo(
-    () => (session ? matchProfile(session.idn) : null),
-    [session],
+    () => (selected?.idn ? matchProfile(selected.idn) : null),
+    [selected?.idn],
   );
 
   const [overrideCommand, setOverrideCommand] = useState("");
   const [overrideOpen, setOverrideOpen] = useState(false);
 
   const capture = useAsyncAction(
-    useCallback((command?: string) => api.captureScreenshot(command), []),
+    useCallback(
+      (command?: string) =>
+        api.captureScreenshot(command, selected?.id),
+      [selected?.id],
+    ),
   );
 
   // An unknown profile reveals the override by default (§5.3).
@@ -67,18 +69,20 @@ export default function ScreenshotSection({
     setOverrideOpen(profile === null);
   }, [profile]);
 
-  // A new session invalidates any previous capture.
+  // A new instrument invalidates any previous capture.
   useEffect(() => {
     capture.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.idn]);
+  }, [selected?.id]);
 
   const shot = capture.result;
 
   const runCapture = useCallback(() => {
     const command = overrideCommand.trim();
-    void capture.run(command === "" ? undefined : command);
-  }, [capture, overrideCommand]);
+    void capture.run(command === "" ? undefined : command).then(() => {
+      void refreshTimeline();
+    });
+  }, [capture, overrideCommand, refreshTimeline]);
 
   // Ctrl+S saves when a capture is present (§3.8).
   useEffect(() => {
@@ -100,19 +104,23 @@ export default function ScreenshotSection({
     <Section
       id="screenshot"
       title="Screenshot"
-      description="Capture the instrument's display."
+      description={
+        selected
+          ? `Capture ${selected.label}'s display.`
+          : "Capture the instrument's display."
+      }
       actions={
         <Button
           variant="primary"
           busy={capture.busy}
-          disabled={!session}
+          disabled={!connected}
           onClick={runCapture}
         >
           Capture
         </Button>
       }
     >
-      {session ? (
+      {connected ? (
         <>
           {errorText && (
             <Alert tone="error" title="Capture failed">
@@ -139,9 +147,7 @@ export default function ScreenshotSection({
               ) : (
                 <div className="preview preview--empty">
                   <span className="preview__placeholder">
-                    {capture.busy
-                      ? "reading image block…"
-                      : "No capture yet."}
+                    {capture.busy ? "reading image block…" : "No capture yet."}
                   </span>
                 </div>
               )}
@@ -190,7 +196,7 @@ export default function ScreenshotSection({
           </div>
         </>
       ) : (
-        <ConnectPrompt onGoToConnection={onGoToConnection} />
+        <ConnectPrompt onGoToConnection={onGoToTopology} />
       )}
     </Section>
   );

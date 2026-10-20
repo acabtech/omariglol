@@ -1,10 +1,10 @@
 /**
- * Application shell.
+ * Application shell (concepts.md §2.4).
  *
- * A single flowing workbench rather than a tabbed utility: a sticky top bar, a
- * persistent sidebar, and one scrollable pane holding every section. Nothing
- * is hidden behind a tab switch, so a running benchmark or script stays in
- * view while the user works elsewhere.
+ * A workspace-aware workbench: a sticky top bar, a persistent sidebar holding
+ * the instrument topology, and one scrollable pane of panels. Nothing is hidden
+ * behind a tab switch, so a running benchmark or script stays in view while the
+ * user works elsewhere.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -14,19 +14,22 @@ import { StatusDot, type StatusState } from "@/components/ui";
 import { useSectionShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useScrollSpy } from "@/hooks/useScrollSpy";
 import { useWindowGeometry } from "@/hooks/useWindowGeometry";
-import { SECTION_IDS, SECTIONS } from "@/lib/types";
+import { PANEL_IDS, PANELS } from "@/lib/types";
 import BenchmarkSection from "@/sections/BenchmarkSection";
-import ConnectionSection from "@/sections/ConnectionSection";
-import ScpiSection from "@/sections/ScpiSection";
+import DiscoverySection from "@/sections/DiscoverySection";
+import InstrumentSection from "@/sections/InstrumentSection";
 import ScreenshotSection from "@/sections/ScreenshotSection";
+import ScpiSection from "@/sections/ScpiSection";
 import ScriptSection from "@/sections/ScriptSection";
-import { SessionProvider, useSession } from "@/state/session";
+import TimelineSection from "@/sections/TimelineSection";
+import WorkspaceSection from "@/sections/WorkspaceSection";
+import { WorkspaceProvider, useWorkspace } from "@/state/workspace";
 import { initialiseTheme, watchTheme } from "@/theme/omarchy";
 
 function Shell() {
-  const { session, connecting, error } = useSession();
+  const { workspace, instruments, loading } = useWorkspace();
   const [themeSource, setThemeSource] = useState<string>("…");
-  const activeSection = useScrollSpy(SECTION_IDS);
+  const activePanel = useScrollSpy(PANEL_IDS);
 
   useEffect(() => {
     let stop: (() => void) | undefined;
@@ -41,7 +44,7 @@ function Shell() {
     return () => stop?.();
   }, []);
 
-  const scrollToSection = useCallback((id: string) => {
+  const scrollToPanel = useCallback((id: string) => {
     const element = document.getElementById(id);
     if (!element) return;
     const reduceMotion = window.matchMedia(
@@ -53,34 +56,35 @@ function Shell() {
     });
   }, []);
 
-  const goToConnection = useCallback(
-    () => scrollToSection("connection"),
-    [scrollToSection],
+  const goToTopology = useCallback(
+    () => scrollToPanel("workspace"),
+    [scrollToPanel],
   );
 
-  // Ctrl+1 … Ctrl+5 jump to a section (§3.8).
+  // Ctrl+1 … Ctrl+8 jump to a panel (§3.8).
   useSectionShortcuts(
     useCallback(
       (index: number) => {
-        const section = SECTIONS[index];
-        if (section) scrollToSection(section.id);
+        const panel = PANELS[index];
+        if (panel) scrollToPanel(panel.id);
       },
-      [scrollToSection],
+      [scrollToPanel],
     ),
   );
 
-  const statusState: StatusState = connecting
+  const connected = instruments.filter((i) => i.state === "connected").length;
+  const statusState: StatusState = loading
     ? "idle"
-    : session
+    : connected > 0
       ? "ok"
-      : error
+      : instruments.some((i) => i.state === "error" || i.state === "offline")
         ? "error"
         : "idle";
-  const statusLabel = connecting
-    ? "connecting…"
-    : session
-      ? `connected: ${session.idn}`
-      : "no instrument connected";
+  const statusLabel = loading
+    ? "loading…"
+    : instruments.length === 0
+      ? "no instruments"
+      : `${connected}/${instruments.length} connected`;
 
   return (
     <div className="app">
@@ -90,6 +94,11 @@ function Shell() {
           <StatusDot state={statusState} />
           <span className="topbar__status-label">{statusLabel}</span>
         </span>
+        {workspace && (
+          <span className="topbar__workspace" title="Active workspace">
+            {workspace.name}
+          </span>
+        )}
         <span className="topbar__spacer" />
         <span
           className="topbar__theme"
@@ -100,16 +109,19 @@ function Shell() {
       </header>
 
       <div className="app__body">
-        <Sidebar activeSection={activeSection} onNavigate={scrollToSection} />
+        <Sidebar activePanel={activePanel} onNavigate={scrollToPanel} />
 
         <main className="workbench">
-          <ConnectionSection />
-          <ScpiSection onGoToConnection={goToConnection} />
+          <WorkspaceSection />
+          <DiscoverySection />
+          <InstrumentSection onGoToTopology={goToTopology} />
+          <ScpiSection onGoToTopology={goToTopology} />
           <div className="workbench__row">
-            <ScreenshotSection onGoToConnection={goToConnection} />
-            <BenchmarkSection onGoToConnection={goToConnection} />
+            <ScreenshotSection onGoToTopology={goToTopology} />
+            <BenchmarkSection onGoToTopology={goToTopology} />
           </div>
-          <ScriptSection onGoToConnection={goToConnection} />
+          <TimelineSection />
+          <ScriptSection onGoToTopology={goToTopology} />
         </main>
       </div>
     </div>
@@ -119,8 +131,8 @@ function Shell() {
 export default function App() {
   useWindowGeometry();
   return (
-    <SessionProvider>
+    <WorkspaceProvider>
       <Shell />
-    </SessionProvider>
+    </WorkspaceProvider>
   );
 }

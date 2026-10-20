@@ -67,7 +67,7 @@ impl Default for BenchmarkOptions {
     fn default() -> Self {
         BenchmarkOptions {
             command: "*IDN?".to_string(),
-            iterations: 100,
+            iterations: 25,
             max_duration: None,
             max_consecutive_failures: 5,
         }
@@ -299,7 +299,7 @@ mod tests {
     fn test_benchmark_default_options() {
         let opts = BenchmarkOptions::default();
         assert_eq!(opts.command, "*IDN?");
-        assert_eq!(opts.iterations, 100);
+        assert_eq!(opts.iterations, 25);
         assert_eq!(opts.max_consecutive_failures, 5);
         assert!(opts.max_duration.is_none());
     }

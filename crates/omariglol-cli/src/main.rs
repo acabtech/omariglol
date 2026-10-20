@@ -128,9 +128,17 @@ pub struct ScreenshotArgs {
     #[arg(value_name = "FILE")]
     pub file: PathBuf,
 
-    /// Use the raw TCP socket instead of VXI-11.
-    #[arg(long)]
+    /// Use the raw TCP socket (the default; kept for explicitness).
+    #[arg(long, conflicts_with = "vxi11")]
     pub raw: bool,
+
+    /// Use VXI-11 instead of the default raw TCP socket.
+    #[arg(long)]
+    pub vxi11: bool,
+
+    /// Override the port (e.g. 5555 for Rigol's raw SCPI socket).
+    #[arg(long, value_name = "PORT")]
+    pub port: Option<u16>,
 
     /// Override the capture query, for instruments without a built-in profile.
     #[arg(long, value_name = "COMMAND")]
@@ -148,7 +156,7 @@ pub struct BenchmarkArgs {
     pub address: String,
 
     /// Number of round trips.
-    #[arg(short, long, default_value_t = 100, value_name = "N")]
+    #[arg(short, long, default_value_t = 25, value_name = "N")]
     pub count: usize,
 
     /// The query to repeat.
@@ -378,14 +386,30 @@ fn interactive(session: &mut Session, hex: bool) -> anyhow::Result<()> {
 
 fn cmd_screenshot(args: ScreenshotArgs) -> anyhow::Result<()> {
     let ip = parse_address(&args.address)?;
-    let transport_kind = if args.raw {
-        Transport::Raw
-    } else {
-        Transport::Vxi11
-    };
-    let target = Target::new(ip, transport_kind).with_timeout(Duration::from_secs(args.timeout));
+    let timeout = Duration::from_secs(args.timeout);
 
-    let mut transport = transport::open(&target)?;
+    // Raw TCP is the default image-acquisition protocol: it streams the image
+    // at TCP speed, whereas VXI-11 caps each read at the instrument's
+    // `maxRecvSize` (often a single Ethernet MTU), which makes large captures
+    // crawl. `--raw` is accepted for explicitness; `--vxi11` opts back in.
+    let transport_kind = match (args.raw, args.vxi11) {
+        (_, true) => Transport::Vxi11,
+        _ => Transport::Raw,
+    };
+
+    let mut transport = if transport_kind == Transport::Vxi11 {
+        let target = Target::new(ip, Transport::Vxi11).with_timeout(timeout);
+        transport::open(&target)?
+    } else if let Some(port) = args.port {
+        let target = Target::new(ip, Transport::Raw)
+            .with_port(port)
+            .with_timeout(timeout);
+        transport::open(&target)?
+    } else {
+        // No port given: probe the known vendor raw ports (Rigol 5555, the
+        // LXI-standard 5025) and use the first that answers.
+        screenshot::open_default_transport(ip, timeout)?
+    };
     vlog!(1, "connected: {}", transport.description());
 
     let idn_bytes = transport.query("*IDN?")?;

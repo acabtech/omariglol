@@ -5,11 +5,16 @@
 //! generic; the per-vendor commands live in [`PROFILES`] and are selected by
 //! matching the instrument's `*IDN?` response.
 
+use std::net::IpAddr;
+use std::time::Duration;
+
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
+use crate::device::{Target, Transport};
 use crate::error::{Error, Result};
-use crate::transport::ScpiTransport;
+use crate::transport::raw::DEFAULT_RAW_PORT;
+use crate::transport::{self, ScpiTransport};
 
 /// Image format of a captured screenshot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,7 +76,12 @@ pub struct ScreenshotProfile {
     pub command: &'static str,
     /// What the instrument is expected to return.
     pub format: ImageFormat,
+    /// The vendor's raw SCPI socket port, used when capturing over raw TCP.
+    pub raw_port: u16,
 }
+
+/// Rigol's raw SCPI socket port. Rigol does not use the LXI-standard 5025.
+pub const RIGOL_RAW_PORT: u16 = 5555;
 
 /// Screenshot recipes, most specific first.
 ///
@@ -86,8 +96,12 @@ pub const PROFILES: &[ScreenshotProfile] = &[
             "RIGOL TECHNOLOGIES,DS1000Z",
         ],
         setup: &[":STOP"],
-        command: ":DISP:DATA?",
-        format: ImageFormat::Bmp,
+        // The DS1000Z can emit PNG directly, which is ~20x smaller than the
+        // default BMP (52 KiB vs 1.1 MiB) and therefore far quicker to pull
+        // over the wire and to embed in the UI.
+        command: ":DISP:DATA? ON,OFF,PNG",
+        format: ImageFormat::Png,
+        raw_port: RIGOL_RAW_PORT,
     },
     ScreenshotProfile {
         name: "Rigol DS2000",
@@ -99,6 +113,7 @@ pub const PROFILES: &[ScreenshotProfile] = &[
         setup: &[":STOP"],
         command: ":DISP:DATA?",
         format: ImageFormat::Bmp,
+        raw_port: RIGOL_RAW_PORT,
     },
     ScreenshotProfile {
         name: "Rigol DS4000",
@@ -110,6 +125,7 @@ pub const PROFILES: &[ScreenshotProfile] = &[
         setup: &[":STOP"],
         command: ":DISP:DATA?",
         format: ImageFormat::Bmp,
+        raw_port: RIGOL_RAW_PORT,
     },
     ScreenshotProfile {
         name: "Keysight InfiniiVision",
@@ -122,6 +138,7 @@ pub const PROFILES: &[ScreenshotProfile] = &[
         setup: &[":STOP"],
         command: ":DISP:DATA? PNG",
         format: ImageFormat::Png,
+        raw_port: DEFAULT_RAW_PORT,
     },
     ScreenshotProfile {
         name: "Rohde & Schwarz",
@@ -129,6 +146,7 @@ pub const PROFILES: &[ScreenshotProfile] = &[
         setup: &[":SYST:DISP:UPD OFF"],
         command: ":HCOP:DEV:LANG PNG;:HCOP:DATA?",
         format: ImageFormat::Png,
+        raw_port: DEFAULT_RAW_PORT,
     },
 ];
 
@@ -141,6 +159,44 @@ pub fn profile_for_idn(idn: &str) -> Option<&'static ScreenshotProfile> {
             .iter()
             .any(|prefix| upper.starts_with(prefix))
     })
+}
+
+/// The distinct raw SCPI ports the known profiles use, in probe order.
+///
+/// The vendor is only known after `*IDN?`, so the port cannot be chosen from
+/// the profile up front; instead every known port is tried in turn.
+pub fn raw_port_candidates() -> Vec<u16> {
+    let mut ports = Vec::new();
+    for profile in PROFILES {
+        if !ports.contains(&profile.raw_port) {
+            ports.push(profile.raw_port);
+        }
+    }
+    ports
+}
+
+/// Open the default transport for image acquisition.
+///
+/// Raw TCP is the default because it streams the image at TCP speed, whereas
+/// VXI-11 caps each read at the instrument's `maxRecvSize` (often a single
+/// Ethernet MTU), which makes large captures crawl. Each known vendor raw port
+/// is tried in turn; a refused connection fails immediately, so probing is
+/// cheap.
+pub fn open_default_transport(
+    address: IpAddr,
+    timeout: Duration,
+) -> Result<Box<dyn ScpiTransport>> {
+    let mut last_err = None;
+    for port in raw_port_candidates() {
+        let target = Target::new(address, Transport::Raw)
+            .with_port(port)
+            .with_timeout(timeout);
+        match transport::open(&target) {
+            Ok(transport) => return Ok(transport),
+            Err(err) => last_err = Some(err),
+        }
+    }
+    Err(last_err.unwrap_or_else(|| Error::Other("no raw SCPI port candidates".to_string())))
 }
 
 /// A captured screenshot.
@@ -356,6 +412,19 @@ mod tests {
     }
 
     #[test]
+    fn test_raw_port_candidates() {
+        let ports = raw_port_candidates();
+        // Both the Rigol port and the LXI-standard port are offered.
+        assert!(ports.contains(&RIGOL_RAW_PORT));
+        assert!(ports.contains(&DEFAULT_RAW_PORT));
+        // Deduplicated.
+        let mut sorted = ports.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), ports.len());
+    }
+
+    #[test]
     fn test_parse_ieee_block_definite() {
         let block = b"#15hello";
         assert_eq!(parse_ieee_block(block).unwrap(), b"hello");
@@ -465,17 +534,17 @@ mod tests {
 
     #[test]
     fn test_capture_with_profile() {
-        let mut block = b"#16".to_vec();
-        block.extend_from_slice(BMP);
+        let mut block = b"#210".to_vec();
+        block.extend_from_slice(PNG);
         let mut transport = MockTransport::new(vec![block]);
         let shot = capture(&mut transport, "RIGOL TECHNOLOGIES,DS1054Z,0,1.0", None).unwrap();
         assert_eq!(shot.profile, "Rigol DS1000Z");
-        assert_eq!(shot.format, ImageFormat::Bmp);
-        assert_eq!(shot.data, BMP);
+        assert_eq!(shot.format, ImageFormat::Png);
+        assert_eq!(shot.data, PNG);
         // Setup command then the capture query.
         assert_eq!(
             transport.sent,
-            vec![":STOP".to_string(), ":DISP:DATA?".to_string()]
+            vec![":STOP".to_string(), ":DISP:DATA? ON,OFF,PNG".to_string()]
         );
     }
 

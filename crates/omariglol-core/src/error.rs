@@ -64,3 +64,19 @@ pub fn vxi11_error_name(code: i32) -> &'static str {
     let _ = code;
     todo!("map Device_ErrorCode to its spec name")
 }
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    #[ignore]
+    fn test_is_timeout_classifies_timeout() {
+        todo!("classify timeout-shaped errors")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_vxi11_error_name_maps_known_codes() {
+        todo!("map Device_ErrorCode to its spec name")
+    }
+}

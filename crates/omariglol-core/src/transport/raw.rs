@@ -64,3 +64,61 @@ impl ScpiTransport for RawTransport {
         todo!("describe the socket")
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    #[ignore]
+    fn test_raw_connect() {
+        todo!("connect to the raw SCPI port")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_raw_send() {
+        todo!("write the command with a newline terminator")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_raw_receive() {
+        todo!("read until newline, buffering any remainder")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_raw_partial_read() {
+        todo!("handle partial reads")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_raw_response_split_across_packets() {
+        todo!("handle response split across packets")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_raw_response_without_terminator_bounded() {
+        todo!("response without terminator is bounded, not unbounded")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_raw_bytes_past_terminator_buffered() {
+        todo!("bytes read past the terminator are returned on the next receive")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_raw_peer() {
+        todo!("return the peer address")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_raw_set_timeout() {
+        todo!("apply a new read timeout")
+    }
+}

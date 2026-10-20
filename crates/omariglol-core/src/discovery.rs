@@ -102,3 +102,79 @@ impl MdnsRecords {
         todo!("resolve instances through SRV and A records")
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    #[ignore]
+    fn test_discover() {
+        todo!("run both mechanisms and merge the results by IP")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_discover_vxi11() {
+        todo!("broadcast PMAP_DUMP over UDP and keep hosts exposing DEVICE_CORE")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_discover_mdns() {
+        todo!("browse _lxi/_scpi-raw/_vxi-11 and correlate PTR/SRV/A records")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_read_name_simple() {
+        todo!("decode a simple DNS name")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_read_name_compression_pointer() {
+        todo!("decode a DNS name with a compression pointer")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_read_name_pointer_loop() {
+        todo!("handle a compression pointer loop without panicking")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_read_name_truncation() {
+        todo!("handle truncated DNS name data gracefully")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_normalise() {
+        todo!("normalise a DNS name")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_strip_service_suffix() {
+        todo!("trim the service type from an mDNS instance name")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_strip_domain() {
+        todo!("trim the .local suffix")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_mdns_records_ingest() {
+        todo!("parse a DNS packet and accumulate PTR/SRV/A records")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_mdns_records_into_devices() {
+        todo!("resolve instances through SRV and A records")
+    }
+}

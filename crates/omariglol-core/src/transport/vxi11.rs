@@ -122,3 +122,67 @@ pub fn has_vxi11(addr: IpAddr, timeout: Duration) -> bool {
     let _ = (addr, timeout);
     todo!("ask the portmapper whether DEVICE_CORE is registered")
 }
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    #[ignore]
+    fn test_create_link_encoding() {
+        todo!("request encoding for create_link")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_device_write_encoding() {
+        todo!("request encoding for device_write")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_device_read_encoding() {
+        todo!("request encoding for device_read")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_device_readstb_encoding() {
+        todo!("request encoding for device_readstb")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_device_trigger_encoding() {
+        todo!("request encoding for device_trigger")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_device_clear_encoding() {
+        todo!("request encoding for device_clear")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_device_lock_unlock_encoding() {
+        todo!("request encoding for device_lock/device_unlock")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_device_remote_local_encoding() {
+        todo!("request encoding for device_remote/device_local")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_destroy_link_encoding() {
+        todo!("request encoding for destroy_link")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_has_vxi11() {
+        todo!("has_vxi11 helper")
+    }
+}

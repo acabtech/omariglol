@@ -119,3 +119,73 @@ pub(crate) fn declared_block_len(data: &[u8]) -> Option<usize> {
     let _ = data;
     todo!("return the declared total block length")
 }
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    #[ignore]
+    fn test_image_format_sniff_png() {
+        todo!("check PNG magic bytes")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_image_format_sniff_bmp() {
+        todo!("check BMP magic bytes")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_image_format_sniff_jpeg() {
+        todo!("check JPEG magic bytes")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_image_format_extension() {
+        todo!("map format to extension")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_profile_for_idn() {
+        todo!("match the IDN against the profile prefix table")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_parse_ieee_block_definite() {
+        todo!("parse #<n><len><payload>")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_parse_ieee_block_indefinite() {
+        todo!("parse #0<payload>")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_parse_ieee_block_non_block_passthrough() {
+        todo!("non-block data is returned unchanged")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_declared_block_len() {
+        todo!("return the declared total block length")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_screenshot_to_base64() {
+        todo!("base64-encode the image")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_screenshot_to_data_url() {
+        todo!("build a data: URL from the format and bytes")
+    }
+}

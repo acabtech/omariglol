@@ -95,3 +95,47 @@ pub(crate) fn summarise(
     let _ = (command, samples, failures, elapsed, bytes_received);
     todo!("compute min/max/mean/median/p95/stddev and throughput")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn test_kbytes_per_second() {
+        todo!("derive throughput from elapsed time and bytes received")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_summarise() {
+        todo!("compute min/max/mean/median/p95/stddev and throughput")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_benchmark_default_options() {
+        let opts = BenchmarkOptions::default();
+        assert_eq!(opts.command, "*IDN?");
+        assert_eq!(opts.iterations, 100);
+        assert_eq!(opts.max_consecutive_failures, 5);
+    }
+
+    #[test]
+    #[ignore]
+    fn test_benchmark_continues_past_failures() {
+        todo!("run continues past individual failures and records them")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_benchmark_progress_callback() {
+        todo!("progress callbacks fire once per round trip")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_benchmark_throughput_consistency() {
+        todo!("messages_per_second and kbytes_per_second are consistent with elapsed time")
+    }
+}

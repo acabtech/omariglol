@@ -103,3 +103,79 @@ pub fn parse_address(input: &str) -> Result<std::net::IpAddr> {
     let _ = input;
     todo!("parse a literal IP, else resolve the hostname")
 }
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    #[ignore]
+    fn test_scpi_transport_query() {
+        todo!("send then receive")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_open_dispatch() {
+        todo!("dispatch on Transport::Vxi11 / Transport::Raw")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_session_open() {
+        todo!("open a transport and wrap it")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_session_send() {
+        todo!("delegate to the transport")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_session_query_raw() {
+        todo!("delegate to the transport")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_session_query() {
+        todo!("delegate and decode as UTF-8")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_session_identify() {
+        todo!("query *IDN?")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_session_description() {
+        todo!("describe the underlying transport")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_session_close() {
+        todo!("close the transport")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_to_hex() {
+        todo!("render bytes as space-separated hex")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_parse_address_ip() {
+        todo!("parse a literal IP")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_parse_address_hostname() {
+        todo!("resolve the hostname")
+    }
+}

@@ -140,3 +140,61 @@ impl Target {
         todo!("carry the discovered ports across to the target")
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    #[ignore]
+    fn test_discovery_method_display() {
+        todo!("human-readable discovery method")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_device_manual() {
+        todo!("construct a manual Device entry")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_device_display_address() {
+        todo!("format the address for display")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_device_label() {
+        todo!("pick the friendliest available name")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_device_display() {
+        todo!("render a device for the CLI")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_transport_display() {
+        todo!("human-readable transport name")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_target_new() {
+        todo!("build a target with default port and timeout")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_target_effective_port() {
+        todo!("resolve the transport's default port")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_target_from_device() {
+        todo!("carry the discovered ports across to the target")
+    }
+}

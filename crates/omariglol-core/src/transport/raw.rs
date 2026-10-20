@@ -21,6 +21,32 @@ pub const MAX_RESPONSE: usize = 32 * 1024 * 1024;
 /// The SCPI terminator.
 const TERMINATOR: u8 = b'\n';
 
+/// Total length of a definite-length IEEE-488.2 block (`#<n><len><data>`) in
+/// `data`, if the header is fully present.
+///
+/// Returns `None` for text, indefinite blocks (`#0`) and incomplete headers,
+/// which fall back to newline framing. Mirrors the parser in
+/// [`crate::screenshot`] but is kept local so the transport layer stays
+/// independent of the screenshot layer.
+fn declared_block_len(data: &[u8]) -> Option<usize> {
+    if data.first() != Some(&b'#') {
+        return None;
+    }
+    let digit = *data.get(1)?;
+    if !digit.is_ascii_digit() {
+        return None;
+    }
+    let n = (digit - b'0') as usize;
+    if n == 0 {
+        return None;
+    }
+    let len_start: usize = 2;
+    let len_end = len_start.checked_add(n)?;
+    let digits = data.get(len_start..len_end)?;
+    let len: usize = std::str::from_utf8(digits).ok()?.parse().ok()?;
+    len_end.checked_add(len)
+}
+
 /// A raw TCP connection to an instrument's SCPI socket.
 pub struct RawTransport {
     stream: TcpStream,
@@ -83,13 +109,37 @@ impl ScpiTransport for RawTransport {
     }
 
     fn receive(&mut self) -> Result<Vec<u8>> {
-        // A previous read may already have buffered a complete line.
-        if let Some(line) = self.take_line() {
-            return Ok(line);
-        }
-
         let mut buf = [0u8; 4096];
         loop {
+            // A definite-length IEEE-488.2 block declares its own size, so read
+            // exactly that many bytes rather than waiting for a newline that a
+            // binary payload may never contain. This is what makes large binary
+            // reads — screenshots — both correct and fast over the raw socket:
+            // the whole image streams in at TCP speed instead of being truncated
+            // at the first `\n` byte inside the pixel data.
+            if let Some(total) = declared_block_len(&self.pending) {
+                while self.pending.len() < total {
+                    let n = self.stream.read(&mut buf)?;
+                    if n == 0 {
+                        break;
+                    }
+                    self.pending.extend_from_slice(&buf[..n]);
+                    if self.pending.len() > MAX_RESPONSE {
+                        return Err(Error::Malformed(format!(
+                            "raw response exceeds MAX_RESPONSE ({} bytes)",
+                            MAX_RESPONSE
+                        )));
+                    }
+                }
+                let take = total.min(self.pending.len());
+                return Ok(self.pending.drain(..take).collect());
+            }
+
+            // A complete newline-terminated line already buffered?
+            if let Some(line) = self.take_line() {
+                return Ok(line);
+            }
+
             let n = self.stream.read(&mut buf)?;
             if n == 0 {
                 // The peer closed. Hand back whatever is buffered, or report
@@ -113,9 +163,6 @@ impl ScpiTransport for RawTransport {
                     "raw response exceeds MAX_RESPONSE ({} bytes) without a terminator",
                     MAX_RESPONSE
                 )));
-            }
-            if let Some(line) = self.take_line() {
-                return Ok(line);
             }
         }
     }
@@ -249,6 +296,48 @@ mod tests {
         transport.pending = vec![b'a'; MAX_RESPONSE];
         let err = transport.receive().unwrap_err();
         assert!(matches!(err, Error::Malformed(_)));
+        let _ = handle.join();
+    }
+
+    #[test]
+    fn test_raw_receive_definite_block_with_newline_in_payload() {
+        // A definite-length block whose binary payload contains a `\n` must be
+        // read in full, not truncated at the newline. The whole block (header
+        // included) is returned; the screenshot layer strips the header.
+        let payload: &[u8] = b"BM\x00\x0a\x00binary\x0a\x00";
+        let mut block = format!("#2{:02}", payload.len()).into_bytes();
+        block.extend_from_slice(payload);
+        let expected = block.clone();
+        let (addr, handle) = spawn_server(move |mut s| {
+            let _ = s.write_all(&block);
+            let _ = s.flush();
+            thread::sleep(Duration::from_millis(200));
+        });
+        let mut transport = connect_to(addr);
+        assert_eq!(transport.receive().unwrap(), expected);
+        let _ = handle.join();
+    }
+
+    #[test]
+    fn test_raw_receive_block_split_across_packets() {
+        // The block header and payload may arrive in separate TCP segments.
+        let payload: &[u8] = b"\x89PNG\r\n\x1a\n\x00\x01\x02\x03";
+        let mut block = format!("#2{:02}", payload.len()).into_bytes();
+        block.extend_from_slice(payload);
+        let expected = block.clone();
+        let (head, tail) = block.split_at(5);
+        let head = head.to_vec();
+        let tail = tail.to_vec();
+        let (addr, handle) = spawn_server(move |mut s| {
+            let _ = s.write_all(&head);
+            let _ = s.flush();
+            thread::sleep(Duration::from_millis(50));
+            let _ = s.write_all(&tail);
+            let _ = s.flush();
+            thread::sleep(Duration::from_millis(200));
+        });
+        let mut transport = connect_to(addr);
+        assert_eq!(transport.receive().unwrap(), expected);
         let _ = handle.join();
     }
 

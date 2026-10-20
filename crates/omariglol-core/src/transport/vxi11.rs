@@ -325,27 +325,45 @@ impl ScpiTransport for Vxi11Transport {
     }
 
     fn receive(&mut self) -> Result<Vec<u8>> {
-        let params = encode_device_read(
-            self.lid,
-            self.read_size,
-            timeout_ms(self.timeout),
-            FLAG_TERMCHRSET,
-            TERMINATOR as i32,
-        );
-        let reply = self
-            .rpc
-            .call(DEVICE_CORE, DEVICE_CORE_VERSION, PROC_DEVICE_READ, &params)?;
-        let mut reader = XdrReader::new(&reply);
-        let error = reader.i32()?;
-        if error != 0 {
-            return Err(Error::Vxi11 {
-                code: error,
-                message: vxi11_error_name(error).to_string(),
-            });
+        // A single `device_read` returns at most `read_size` bytes and sets the
+        // reason bits to say why it stopped. Instruments such as the Rigol
+        // DS1000Z advertise a small `maxRecvSize` (1500 bytes, one Ethernet
+        // MTU), so a large response — a screenshot, say — arrives in many
+        // chunks. Keep reading until the END indicator is set, accumulating the
+        // payload, so the caller sees the whole response.
+        let mut data = Vec::new();
+        loop {
+            let params = encode_device_read(
+                self.lid,
+                self.read_size,
+                timeout_ms(self.timeout),
+                FLAG_TERMCHRSET,
+                TERMINATOR as i32,
+            );
+            let reply =
+                self.rpc
+                    .call(DEVICE_CORE, DEVICE_CORE_VERSION, PROC_DEVICE_READ, &params)?;
+            let mut reader = XdrReader::new(&reply);
+            let error = reader.i32()?;
+            if error != 0 {
+                return Err(Error::Vxi11 {
+                    code: error,
+                    message: vxi11_error_name(error).to_string(),
+                });
+            }
+            let reason = reader.i32()?;
+            self.last_reason = reason;
+            let chunk = reader.opaque()?;
+            let chunk_len = chunk.len();
+            data.extend_from_slice(chunk);
+
+            // END means the instrument has sent everything. A zero-length chunk
+            // means no progress, so stop rather than spin forever.
+            if reason & REASON_END != 0 || chunk_len == 0 {
+                break;
+            }
         }
-        let reason = reader.i32()?;
-        self.last_reason = reason;
-        let mut data = reader.opaque()?.to_vec();
+
         // Strip the transport terminator, as the trait contract requires.
         if data.last() == Some(&TERMINATOR) {
             data.pop();

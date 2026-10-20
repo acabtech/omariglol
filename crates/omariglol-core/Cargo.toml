@@ -1,0 +1,17 @@
+[package]
+name = "omariglol-core"
+description = "LXI / SCPI protocol core: VXI-11, raw TCP, discovery, screenshot, benchmark"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+base64 = { workspace = true }
+rand = { workspace = true }
+socket2 = { workspace = true }

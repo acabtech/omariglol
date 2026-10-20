@@ -1,0 +1,30 @@
+# Rust
+/target
+**/*.rs.bk
+*.pdb
+
+# Node / frontend
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# Editors
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local artefacts: captured screenshots and measurement logs dropped in the
+# repo root. Scoped to the root so bundled assets (src-tauri/icons) are kept.
+/*.png
+/*.csv
+/*.bin

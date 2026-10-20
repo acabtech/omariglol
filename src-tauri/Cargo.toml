@@ -1,0 +1,35 @@
+[package]
+name = "omariglol"
+version = "0.1.0"
+description = "LXI / SCPI instrument control for the Omarchy desktop"
+authors = ["Sam Ralial <sam@alatcerdas.tech>"]
+license = "MIT"
+repository = "https://github.com/acabtech/omariglol"
+edition = "2024"
+
+# Standalone package (excluded from the root workspace) so the `tauri` CLI and
+# `tauri-build` see a conventional layout. Dependencies are therefore spelled
+# out rather than inherited from `workspace.dependencies`.
+[lib]
+name = "omariglol_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+omariglol-core = { path = "../crates/omariglol-core" }
+omariglol-script = { path = "../crates/omariglol-script" }
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+dirs = "6"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+strip = true

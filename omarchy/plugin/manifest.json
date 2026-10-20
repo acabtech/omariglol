@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "acabtech.omariglol",
+  "name": "omariglol",
+  "version": "0.1.0",
+  "author": "Sam Ralial",
+  "license": "MIT",
+  "description": "Control an LXI / SCPI instrument from the Omarchy bar.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "omariglol",
+    "category": "Hardware",
+    "allowMultiple": true,
+    "defaultSection": "right"
+  }
+}

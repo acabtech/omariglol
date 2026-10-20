@@ -1,0 +1,20 @@
+[package]
+name = "omariglol-cli"
+description = "Command-line interface for omariglol, feature-parity with lxi-tools"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "omariglol"
+path = "src/main.rs"
+
+[dependencies]
+omariglol-core = { workspace = true }
+omariglol-script = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+serde_json = { workspace = true }

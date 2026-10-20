@@ -1,0 +1,270 @@
+/* ---------------------------------------------------------------------------
+ * omariglol styles
+ *
+ * Every colour in the app comes from a `--om-*` custom property defined here.
+ * The values below are the built-in fallback palette; `src/theme/omarchy.ts`
+ * overwrites them at runtime from the live Omarchy theme.
+ *
+ * Nothing in this file (or any component) may name a literal colour outside
+ * this block. That is what makes theme switching free.
+ * ------------------------------------------------------------------------- */
+
+:root {
+  /* Fallback palette — a neutral dark theme, replaced at runtime. */
+  --om-background: #1a1b26;
+  --om-foreground: #a9b1d6;
+  --om-bright-foreground: #c0caf5;
+  --om-accent: #7aa2f7;
+  --om-selection: #292e42;
+  --om-muted: #414868;
+  --om-red: #f7768e;
+  --om-green: #9ece6a;
+  --om-yellow: #e0af68;
+  --om-orange: #eb927b;
+  --om-blue: #7aa2f7;
+  --om-magenta: #ad8ee6;
+  --om-cyan: #449dab;
+  --om-brown: #75493d;
+  --om-bright-red: #ff7a93;
+  --om-bright-green: #b9f27c;
+  --om-bright-yellow: #ff9e64;
+  --om-bright-blue: #7da6ff;
+  --om-bright-magenta: #bb9af7;
+  --om-bright-cyan: #0db9d7;
+
+  --om-surface: color-mix(in srgb, var(--om-background) 88%, var(--om-foreground));
+  --om-surface-raised: color-mix(in srgb, var(--om-background) 80%, var(--om-foreground));
+  --om-border: color-mix(in srgb, var(--om-background) 70%, var(--om-foreground));
+
+  --om-radius: 8px;
+  --om-radius-sm: 5px;
+  --om-gap: 12px;
+  --om-font: "JetBrainsMono Nerd Font", "JetBrains Mono", ui-monospace, monospace;
+  --om-font-ui: system-ui, -apple-system, "Inter", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--om-background);
+  color: var(--om-foreground);
+  font-family: var(--om-font-ui);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------------------------------------------------------------------------
+ * Layout
+ * ------------------------------------------------------------------------- */
+
+.app {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100%;
+}
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  gap: var(--om-gap);
+  padding: 10px 14px;
+  background: var(--om-surface);
+  border-bottom: 1px solid var(--om-border);
+}
+
+.titlebar__title {
+  font-weight: 600;
+  color: var(--om-bright-foreground);
+}
+
+.titlebar__spacer {
+  flex: 1;
+}
+
+/* ---------------------------------------------------------------------------
+ * Mode switcher
+ * ------------------------------------------------------------------------- */
+
+.modes {
+  display: flex;
+  gap: 4px;
+  padding: 8px 14px 0;
+}
+
+.mode-tab {
+  padding: 7px 14px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: var(--om-radius-sm) var(--om-radius-sm) 0 0;
+  background: transparent;
+  color: var(--om-muted);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.mode-tab:hover {
+  color: var(--om-foreground);
+}
+
+.mode-tab[aria-selected="true"] {
+  background: var(--om-surface);
+  border-color: var(--om-border);
+  color: var(--om-accent);
+}
+
+.mode-body {
+  padding: 14px;
+  background: var(--om-surface);
+  border-top: 1px solid var(--om-border);
+  overflow: auto;
+}
+
+/* ---------------------------------------------------------------------------
+ * Shared primitives
+ * ------------------------------------------------------------------------- */
+
+.panel {
+  background: var(--om-surface-raised);
+  border: 1px solid var(--om-border);
+  border-radius: var(--om-radius);
+  padding: var(--om-gap);
+}
+
+.button {
+  padding: 7px 14px;
+  border: 1px solid var(--om-border);
+  border-radius: var(--om-radius-sm);
+  background: var(--om-surface-raised);
+  color: var(--om-foreground);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  border-color: var(--om-accent);
+  color: var(--om-accent);
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.button--primary {
+  background: var(--om-accent);
+  border-color: var(--om-accent);
+  color: var(--om-background);
+  font-weight: 600;
+}
+
+.button--danger:hover:not(:disabled) {
+  border-color: var(--om-red);
+  color: var(--om-red);
+}
+
+.input,
+.select {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--om-border);
+  border-radius: var(--om-radius-sm);
+  background: var(--om-background);
+  color: var(--om-foreground);
+  font-family: var(--om-font);
+  font-size: 13px;
+}
+
+.input:focus,
+.select:focus {
+  outline: none;
+  border-color: var(--om-accent);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.field__label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--om-muted);
+}
+
+/* Console-style output, used by the SCPI and Script modes. */
+.console {
+  margin: 0;
+  padding: var(--om-gap);
+  background: var(--om-background);
+  border: 1px solid var(--om-border);
+  border-radius: var(--om-radius-sm);
+  color: var(--om-foreground);
+  font-family: var(--om-font);
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: auto;
+}
+
+.console--error {
+  color: var(--om-red);
+}
+
+.stub {
+  color: var(--om-muted);
+  font-style: italic;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--om-muted);
+}
+
+.status-dot--ok {
+  background: var(--om-green);
+}
+
+.status-dot--error {
+  background: var(--om-red);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.table th,
+.table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--om-border);
+  text-align: left;
+}
+
+.table th {
+  color: var(--om-muted);
+  font-weight: 500;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.mono {
+  font-family: var(--om-font);
+}

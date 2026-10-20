@@ -9,6 +9,9 @@ dist/
 dist-ssr/
 *.local
 
+# Plans
+plans/
+
 # Tauri
 src-tauri/target/
 src-tauri/gen/

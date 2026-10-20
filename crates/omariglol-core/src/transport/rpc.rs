@@ -40,6 +40,11 @@ pub const IPPROTO_UDP: u32 = 17;
 /// broken peer.
 pub const MAX_RECORD: usize = 16 * 1024 * 1024;
 
+/// Largest UDP datagram we will accept from a portmapper. A `PMAP_DUMP` reply
+/// is a few kilobytes at most, so this is generous while keeping the receive
+/// buffer off the stack.
+const MAX_UDP_DATAGRAM: usize = 64 * 1024;
+
 // ---------------------------------------------------------------------------
 // XDR
 // ---------------------------------------------------------------------------
@@ -68,6 +73,15 @@ impl Xdr {
     pub fn bool(&mut self, v: bool) -> &mut Self {
         self.buf
             .extend_from_slice(&(if v { 1u32 } else { 0u32 }).to_be_bytes());
+        self
+    }
+
+    /// Append already-encoded XDR bytes verbatim, with no length prefix.
+    ///
+    /// This is how procedure arguments are appended to a `CALL` body: they
+    /// follow the verifier directly rather than being wrapped in an opaque.
+    pub fn raw(&mut self, data: &[u8]) -> &mut Self {
+        self.buf.extend_from_slice(data);
         self
     }
 
@@ -146,7 +160,9 @@ impl<'a> XdrReader<'a> {
         self.ensure(len)?;
         let data = &self.buf[self.pos..self.pos + len];
         self.pos += len;
+        // The padding is part of the stream, so it must be present too.
         let pad = (4 - (len % 4)) % 4;
+        self.ensure(pad)?;
         self.pos += pad;
         Ok(data)
     }
@@ -154,6 +170,22 @@ impl<'a> XdrReader<'a> {
     pub fn string(&mut self) -> Result<String> {
         let data = self.opaque()?;
         String::from_utf8(data.to_vec()).map_err(|e| Error::Malformed(e.to_string()))
+    }
+
+    /// Skip an `opaque_auth` (flavor, length-prefixed padded body).
+    ///
+    /// Both the call verifier and the accepted-reply verifier are encoded this
+    /// way; with `AUTH_NULL` the body is empty but the two length words are
+    /// still present.
+    pub fn skip_auth(&mut self) -> Result<()> {
+        let _flavor = self.u32()?;
+        let len = self.u32()? as usize;
+        self.ensure(len)?;
+        self.pos += len;
+        let pad = (4 - (len % 4)) % 4;
+        self.ensure(pad)?;
+        self.pos += pad;
+        Ok(())
     }
 
     pub fn skip(&mut self, n: usize) -> Result<()> {
@@ -210,7 +242,8 @@ impl RpcClient {
         proc: u32,
         params: &[u8],
     ) -> Result<()> {
-        // Build the CALL body.
+        // Build the CALL body. Procedure arguments follow the verifier
+        // directly, with no length prefix.
         let mut body = Xdr::new();
         body.u32(xid);
         body.u32(RPC_CALL);
@@ -224,16 +257,12 @@ impl RpcClient {
         // AUTH_NULL verifier.
         body.u32(AUTH_NULL);
         body.u32(0); // verifier length = 0
-        body.opaque(params);
+        body.raw(params);
 
         let body_bytes = body.into_bytes();
 
-        // Record-mark the body.
-        let last = true;
-        let mut header = (body_bytes.len() as u32) & 0x7FFF_FFFF;
-        if last {
-            header |= 0x8000_0000;
-        }
+        // Record-mark the body: one fragment, last-fragment bit set.
+        let header = (body_bytes.len() as u32 & 0x7FFF_FFFF) | 0x8000_0000;
         self.stream.write_all(&header.to_be_bytes())?;
         self.stream.write_all(&body_bytes)?;
         self.stream.flush()?;
@@ -242,39 +271,48 @@ impl RpcClient {
 
     fn recv_reply(&mut self, expected_xid: u32) -> Result<Vec<u8>> {
         let body_buf = read_record(&mut self.stream)?;
+        parse_reply(&body_buf, Some(expected_xid))
+    }
+}
 
-        // Parse the reply.
-        let mut reader = XdrReader::new(&body_buf);
-        let xid = reader.u32()?;
-        if xid != expected_xid {
+/// Parse an RPC reply body, returning everything after `accept_stat`.
+///
+/// When `expected_xid` is `Some`, the reply's transaction id must match.
+fn parse_reply(body_buf: &[u8], expected_xid: Option<u32>) -> Result<Vec<u8>> {
+    let mut reader = XdrReader::new(body_buf);
+    let xid = reader.u32()?;
+    if let Some(expected) = expected_xid {
+        if xid != expected {
             return Err(Error::Rpc(format!(
                 "unexpected XID: got {}, expected {}",
-                xid, expected_xid
+                xid, expected
             )));
         }
-        let direction = reader.u32()?;
-        if direction != RPC_REPLY {
-            return Err(Error::Rpc(format!(
-                "expected REPLY direction, got {}",
-                direction
-            )));
-        }
-        let reply_state = reader.u32()?;
-        if reply_state != MSG_ACCEPTED {
-            return Err(Error::Rpc("RPC reply was denied".to_string()));
-        }
-        let accept_state = reader.u32()?;
-        if accept_state != SUCCESS {
-            return Err(Error::Rpc(format!(
-                "RPC call failed with accept state {}",
-                accept_state
-            )));
-        }
-
-        // Return everything after accept_stat (the result body).
-        let remaining = reader.remaining();
-        Ok(body_buf[body_buf.len() - remaining..].to_vec())
     }
+    let direction = reader.u32()?;
+    if direction != RPC_REPLY {
+        return Err(Error::Rpc(format!(
+            "expected REPLY direction, got {}",
+            direction
+        )));
+    }
+    let reply_state = reader.u32()?;
+    if reply_state != MSG_ACCEPTED {
+        return Err(Error::Rpc("RPC reply was denied".to_string()));
+    }
+    // The accepted reply carries a verifier before the accept status.
+    reader.skip_auth()?;
+    let accept_state = reader.u32()?;
+    if accept_state != SUCCESS {
+        return Err(Error::Rpc(format!(
+            "RPC call failed with accept state {}",
+            accept_state
+        )));
+    }
+
+    // Everything after accept_stat is the procedure result.
+    let remaining = reader.remaining();
+    Ok(body_buf[body_buf.len() - remaining..].to_vec())
 }
 
 /// Read one record-marked message from `reader`, reassembling fragments.
@@ -327,6 +365,31 @@ pub struct PortMapping {
     pub port: u16,
 }
 
+/// Walk a `pmaplist` result, which is a linked list of `{ pmap, bool next }`.
+fn parse_pmaplist(reader: &mut XdrReader<'_>) -> Result<Vec<PortMapping>> {
+    let mut mappings = Vec::new();
+    loop {
+        if reader.remaining() == 0 {
+            break;
+        }
+        let prog = reader.u32()?;
+        let vers = reader.u32()?;
+        let prot = reader.u32()?;
+        let port = reader.u32()?;
+        let more = reader.bool()?;
+        mappings.push(PortMapping {
+            prog,
+            vers,
+            prot,
+            port: port as u16,
+        });
+        if !more {
+            break;
+        }
+    }
+    Ok(mappings)
+}
+
 /// Ask the portmapper on `addr:111` which port a program is registered on.
 ///
 /// Returns `Ok(None)` when the program simply is not registered, which is the
@@ -338,11 +401,7 @@ pub fn pmap_getport(
     prot: u32,
     timeout: Duration,
 ) -> Result<Option<u16>> {
-    let port = match addr {
-        IpAddr::V4(a) => a,
-        IpAddr::V6(_) => return Err(Error::Addr("IPv6 not supported for portmapper".to_string())),
-    };
-    let socket_addr = SocketAddr::new(IpAddr::V4(port), 111);
+    let socket_addr = SocketAddr::new(addr, 111);
     let mut client = RpcClient::connect(socket_addr, timeout)?;
     let mut params = Xdr::new();
     params.u32(prog);
@@ -366,32 +425,11 @@ pub fn pmap_getport(
 
 /// Ask the portmapper for its full program table (`PMAP_DUMP`).
 pub fn pmap_dump(addr: IpAddr, timeout: Duration) -> Result<Vec<PortMapping>> {
-    let port = match addr {
-        IpAddr::V4(a) => a,
-        IpAddr::V6(_) => return Err(Error::Addr("IPv6 not supported for portmapper".to_string())),
-    };
-    let socket_addr = SocketAddr::new(IpAddr::V4(port), 111);
+    let socket_addr = SocketAddr::new(addr, 111);
     let mut client = RpcClient::connect(socket_addr, timeout)?;
     let reply = client.call(PROG_PORTMAP, VERS_PORTMAP, PROC_PMAP_DUMP, &[])?;
     let mut reader = XdrReader::new(&reply);
-    let mut mappings = Vec::new();
-    loop {
-        let remaining = reader.remaining();
-        if remaining == 0 {
-            break;
-        }
-        let prog = reader.u32()?;
-        let vers = reader.u32()?;
-        let prot = reader.u32()?;
-        let port = reader.u32()?;
-        mappings.push(PortMapping {
-            prog,
-            vers,
-            prot,
-            port: port as u16,
-        });
-    }
-    Ok(mappings)
+    parse_pmaplist(&mut reader)
 }
 
 // ---------------------------------------------------------------------------
@@ -399,9 +437,9 @@ pub fn pmap_dump(addr: IpAddr, timeout: Duration) -> Result<Vec<PortMapping>> {
 // ---------------------------------------------------------------------------
 
 /// Build a PMAP_GETPORT UDP request payload.
-fn pmap_getport_udp_payload(prog: u32, vers: u32, prot: u32) -> Vec<u8> {
+fn pmap_getport_udp_payload(xid: u32, prog: u32, vers: u32, prot: u32) -> Vec<u8> {
     let mut xdr = Xdr::new();
-    xdr.u32(0); // XID placeholder
+    xdr.u32(xid);
     xdr.u32(RPC_CALL);
     xdr.u32(RPC_VERSION);
     xdr.u32(PROG_PORTMAP);
@@ -418,35 +456,20 @@ fn pmap_getport_udp_payload(prog: u32, vers: u32, prot: u32) -> Vec<u8> {
     xdr.into_bytes()
 }
 
-/// Parse a PMAP_GETPORT UDP reply.
-fn parse_pmap_getport_udp_reply(buf: &[u8]) -> Result<Option<u16>> {
-    // UDP RPC replies have a 4-byte XID, then the same body as TCP.
-    if buf.len() < 8 {
-        return Err(Error::Malformed(
-            "PMAP_GETPORT UDP reply too short".to_string(),
-        ));
-    }
-    let mut reader = XdrReader::new(&buf[4..]); // skip XID
-    let direction = reader.u32()?;
-    if direction != RPC_REPLY {
-        return Err(Error::Rpc(
-            "expected REPLY in UDP pmap response".to_string(),
-        ));
-    }
-    let reply_state = reader.u32()?;
-    if reply_state != MSG_ACCEPTED {
-        return Err(Error::Rpc("PMAP_GETPORT UDP reply denied".to_string()));
-    }
-    let accept_state = reader.u32()?;
-    if accept_state != SUCCESS {
-        return Err(Error::Rpc("PMAP_GETPORT UDP call failed".to_string()));
-    }
-    let port = reader.u32()?;
-    if port == 0 {
-        Ok(None)
-    } else {
-        Ok(Some(port as u16))
-    }
+/// Build a PMAP_DUMP UDP request payload.
+fn pmap_dump_udp_payload(xid: u32) -> Vec<u8> {
+    let mut xdr = Xdr::new();
+    xdr.u32(xid);
+    xdr.u32(RPC_CALL);
+    xdr.u32(RPC_VERSION);
+    xdr.u32(PROG_PORTMAP);
+    xdr.u32(VERS_PORTMAP);
+    xdr.u32(PROC_PMAP_DUMP);
+    xdr.u32(AUTH_NULL);
+    xdr.u32(0);
+    xdr.u32(AUTH_NULL);
+    xdr.u32(0);
+    xdr.into_bytes()
 }
 
 /// Ask the portmapper over **UDP** which port a program is registered on.
@@ -462,12 +485,22 @@ pub fn pmap_getport_udp(
 ) -> Result<Option<u16>> {
     let socket = UdpSocket::bind("0.0.0.0:0")?;
     socket.set_read_timeout(Some(timeout))?;
+    let xid = rand::random::<u32>();
     let target = SocketAddr::new(addr, 111);
-    socket.send_to(&pmap_getport_udp_payload(prog, vers, prot), target)?;
+    socket.send_to(&pmap_getport_udp_payload(xid, prog, vers, prot), target)?;
 
-    let mut buf = [0u8; 1024];
+    let mut buf = vec![0u8; MAX_UDP_DATAGRAM];
     match socket.recv_from(&mut buf) {
-        Ok((n, _src)) => parse_pmap_getport_udp_reply(&buf[..n]),
+        Ok((n, _src)) => {
+            let reply = parse_reply(&buf[..n], Some(xid))?;
+            let mut reader = XdrReader::new(&reply);
+            let port = reader.u32()?;
+            if port == 0 {
+                Ok(None)
+            } else {
+                Ok(Some(port as u16))
+            }
+        }
         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
         Err(e) if e.kind() == std::io::ErrorKind::TimedOut => Ok(None),
         Err(e) => Err(e.into()),
@@ -480,102 +513,27 @@ pub fn pmap_dump_udp(timeout: Duration) -> Result<Vec<PortMapping>> {
     socket.set_read_timeout(Some(timeout))?;
     socket.set_broadcast(true)?;
 
-    // Build the PMAP_DUMP UDP request.
-    let mut xdr = Xdr::new();
-    xdr.u32(0); // XID placeholder
-    xdr.u32(RPC_CALL);
-    xdr.u32(RPC_VERSION);
-    xdr.u32(PROG_PORTMAP);
-    xdr.u32(VERS_PORTMAP);
-    xdr.u32(PROC_PMAP_DUMP);
-    xdr.u32(AUTH_NULL);
-    xdr.u32(0);
-    xdr.u32(AUTH_NULL);
-    xdr.u32(0);
-    xdr.into_bytes();
-
-    // Send broadcast to port 111.
+    let xid = rand::random::<u32>();
     let broadcast_addr: SocketAddr = "255.255.255.255:111".parse().unwrap();
-    socket.send_to(&pmap_dump_udp_payload(), broadcast_addr)?;
+    socket.send_to(&pmap_dump_udp_payload(xid), broadcast_addr)?;
 
-    // Collect responses.
+    // Collect responses until the read timeout fires.
     let mut mappings = Vec::new();
-    let mut buf = [0u8; MAX_RECORD];
+    let mut buf = vec![0u8; MAX_UDP_DATAGRAM];
     loop {
         match socket.recv_from(&mut buf) {
             Ok((n, _src)) => {
-                if n >= 4 {
-                    if let Ok(reply) = parse_pmap_dump_udp_reply(&buf[..n]) {
-                        mappings.extend(reply);
+                // A reply from a host that did not echo our XID is ignored.
+                if let Ok(reply) = parse_reply(&buf[..n], Some(xid)) {
+                    let mut reader = XdrReader::new(&reply);
+                    if let Ok(found) = parse_pmaplist(&mut reader) {
+                        mappings.extend(found);
                     }
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => break,
             Err(_) => break,
-        }
-    }
-    Ok(mappings)
-}
-
-/// Build a PMAP_DUMP UDP request payload.
-fn pmap_dump_udp_payload() -> Vec<u8> {
-    let mut xdr = Xdr::new();
-    xdr.u32(0); // XID placeholder
-    xdr.u32(RPC_CALL);
-    xdr.u32(RPC_VERSION);
-    xdr.u32(PROG_PORTMAP);
-    xdr.u32(VERS_PORTMAP);
-    xdr.u32(PROC_PMAP_DUMP);
-    xdr.u32(AUTH_NULL);
-    xdr.u32(0);
-    xdr.u32(AUTH_NULL);
-    xdr.u32(0);
-    xdr.into_bytes()
-}
-
-/// Parse a PMAP_DUMP UDP reply payload (including the 4-byte XID prefix).
-fn parse_pmap_dump_udp_reply(buf: &[u8]) -> Result<Vec<PortMapping>> {
-    if buf.len() < 4 {
-        return Err(Error::Malformed(
-            "PMAP_DUMP UDP reply too short".to_string(),
-        ));
-    }
-    let mut reader = XdrReader::new(&buf[4..]); // skip XID
-    let direction = reader.u32()?;
-    if direction != RPC_REPLY {
-        return Err(Error::Rpc(
-            "expected REPLY in UDP pmap dump response".to_string(),
-        ));
-    }
-    let reply_state = reader.u32()?;
-    if reply_state != MSG_ACCEPTED {
-        return Err(Error::Rpc("PMAP_DUMP UDP reply denied".to_string()));
-    }
-    let accept_state = reader.u32()?;
-    if accept_state != SUCCESS {
-        return Err(Error::Rpc("PMAP_DUMP UDP call failed".to_string()));
-    }
-
-    let mut mappings = Vec::new();
-    loop {
-        let remaining = reader.remaining();
-        if remaining == 0 {
-            break;
-        }
-        // Each entry is followed by a 4-byte "follows" flag.
-        let prog = reader.u32()?;
-        let vers = reader.u32()?;
-        let prot = reader.u32()?;
-        let port = reader.u32()?;
-        let follows = reader.u32()?;
-        mappings.push(PortMapping {
-            prog,
-            vers,
-            prot,
-            port: port as u16,
-        });
-        if follows == 0 {
-            break;
         }
     }
     Ok(mappings)
@@ -649,6 +607,13 @@ mod tests {
     }
 
     #[test]
+    fn test_xdr_raw_has_no_length_prefix() {
+        let mut xdr = Xdr::new();
+        xdr.raw(&[0xAA, 0xBB]);
+        assert_eq!(xdr.into_bytes(), [0xAA, 0xBB]);
+    }
+
+    #[test]
     fn test_xdr_reader_bounds_checked_skip() {
         let mut reader = XdrReader::new(&[0u8; 4]);
         reader.skip(4).unwrap();
@@ -670,42 +635,129 @@ mod tests {
     }
 
     #[test]
-    fn test_pmap_getport_unregistered_returns_none() {
-        // Craft a PMAP_GETPORT reply with port=0 (not registered).
-        // XID=0, REPLY, MSG_ACCEPTED, SUCCESS, port=0
-        let reply: &[u8] = &[
-            0x00, 0x00, 0x00, 0x00, // XID
-            0x00, 0x00, 0x00, 0x01, // REPLY
-            0x00, 0x00, 0x00, 0x00, // MSG_ACCEPTED
-            0x00, 0x00, 0x00, 0x00, // SUCCESS
-            0x00, 0x00, 0x00, 0x00, // port = 0
+    fn test_xdr_reader_opaque_missing_padding_errors() {
+        // Length says 3 bytes, but only the 3 data bytes are present and the
+        // mandatory padding byte is missing. This must be an error, not a
+        // cursor that runs past the end of the buffer.
+        let buf = [0x00, 0x00, 0x00, 0x03, 0xAA, 0xBB, 0xCC];
+        let mut reader = XdrReader::new(&buf);
+        assert!(reader.opaque().is_err());
+    }
+
+    #[test]
+    fn test_skip_auth_null() {
+        // flavor = AUTH_NULL, length = 0, then a u32 to prove the cursor moved.
+        let buf = [
+            0x00, 0x00, 0x00, 0x00, // flavor = AUTH_NULL
+            0x00, 0x00, 0x00, 0x00, // length = 0
+            0x00, 0x00, 0x00, 0x2A, // trailing value
         ];
-        let result = parse_pmap_getport_udp_reply(reply).unwrap();
-        assert_eq!(result, None);
+        let mut reader = XdrReader::new(&buf);
+        reader.skip_auth().unwrap();
+        assert_eq!(reader.u32().unwrap(), 0x2A);
+    }
+
+    #[test]
+    fn test_parse_reply_skips_verifier() {
+        // xid, REPLY, MSG_ACCEPTED, verf(AUTH_NULL,0), SUCCESS, result=0x1234
+        let mut xdr = Xdr::new();
+        xdr.u32(0xABCD);
+        xdr.u32(RPC_REPLY);
+        xdr.u32(MSG_ACCEPTED);
+        xdr.u32(AUTH_NULL);
+        xdr.u32(0);
+        xdr.u32(SUCCESS);
+        xdr.u32(0x1234);
+        let body = xdr.into_bytes();
+        let result = parse_reply(&body, Some(0xABCD)).unwrap();
+        let mut reader = XdrReader::new(&result);
+        assert_eq!(reader.u32().unwrap(), 0x1234);
+    }
+
+    #[test]
+    fn test_parse_reply_rejects_wrong_xid() {
+        let mut xdr = Xdr::new();
+        xdr.u32(0x1111);
+        xdr.u32(RPC_REPLY);
+        xdr.u32(MSG_ACCEPTED);
+        xdr.u32(AUTH_NULL);
+        xdr.u32(0);
+        xdr.u32(SUCCESS);
+        let body = xdr.into_bytes();
+        assert!(parse_reply(&body, Some(0x2222)).is_err());
+    }
+
+    #[test]
+    fn test_pmap_getport_unregistered_returns_none() {
+        // A PMAP_GETPORT reply with port=0 (not registered).
+        let mut xdr = Xdr::new();
+        xdr.u32(0x0000_0001); // XID
+        xdr.u32(RPC_REPLY);
+        xdr.u32(MSG_ACCEPTED);
+        xdr.u32(AUTH_NULL); // verifier flavor
+        xdr.u32(0); // verifier length
+        xdr.u32(SUCCESS);
+        xdr.u32(0); // port = 0
+        let reply = xdr.into_bytes();
+        let result = parse_reply(&reply, Some(1)).unwrap();
+        let mut reader = XdrReader::new(&result);
+        assert_eq!(reader.u32().unwrap(), 0);
     }
 
     #[test]
     fn test_pmap_dump_decodes_reply() {
-        // Craft a PMAP_DUMP reply with one entry.
-        // XID=0, REPLY, MSG_ACCEPTED, SUCCESS
-        // prog=100000, vers=2, prot=6(TCP), port=111, follows=0
-        let reply: &[u8] = &[
-            0x00, 0x00, 0x00, 0x00, // XID
-            0x00, 0x00, 0x00, 0x01, // REPLY
-            0x00, 0x00, 0x00, 0x00, // MSG_ACCEPTED
-            0x00, 0x00, 0x00, 0x00, // SUCCESS
-            0x00, 0x01, 0x86, 0xA0, // prog = 100000
-            0x00, 0x00, 0x00, 0x02, // vers = 2
-            0x00, 0x00, 0x00, 0x06, // prot = TCP
-            0x00, 0x00, 0x00, 0x6F, // port = 111
-            0x00, 0x00, 0x00, 0x00, // follows = 0 (last entry)
-        ];
-        let result = parse_pmap_dump_udp_reply(reply).unwrap();
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].prog, 100_000);
-        assert_eq!(result[0].vers, 2);
-        assert_eq!(result[0].prot, 6);
-        assert_eq!(result[0].port, 111);
+        // A PMAP_DUMP reply with one entry followed by the end-of-list flag.
+        let mut xdr = Xdr::new();
+        xdr.u32(0x0000_0001); // XID
+        xdr.u32(RPC_REPLY);
+        xdr.u32(MSG_ACCEPTED);
+        xdr.u32(AUTH_NULL); // verifier flavor
+        xdr.u32(0); // verifier length
+        xdr.u32(SUCCESS);
+        xdr.u32(100_000); // prog
+        xdr.u32(2); // vers
+        xdr.u32(IPPROTO_TCP); // prot
+        xdr.u32(111); // port
+        xdr.bool(false); // no more entries
+        let reply = xdr.into_bytes();
+        let result = parse_reply(&reply, Some(1)).unwrap();
+        let mut reader = XdrReader::new(&result);
+        let mappings = parse_pmaplist(&mut reader).unwrap();
+        assert_eq!(mappings.len(), 1);
+        assert_eq!(mappings[0].prog, 100_000);
+        assert_eq!(mappings[0].vers, 2);
+        assert_eq!(mappings[0].prot, IPPROTO_TCP);
+        assert_eq!(mappings[0].port, 111);
+    }
+
+    #[test]
+    fn test_pmap_dump_decodes_multiple_entries() {
+        let mut xdr = Xdr::new();
+        xdr.u32(0x0000_0001);
+        xdr.u32(RPC_REPLY);
+        xdr.u32(MSG_ACCEPTED);
+        xdr.u32(AUTH_NULL);
+        xdr.u32(0);
+        xdr.u32(SUCCESS);
+        // First entry, more to follow.
+        xdr.u32(100_000);
+        xdr.u32(2);
+        xdr.u32(IPPROTO_TCP);
+        xdr.u32(111);
+        xdr.bool(true);
+        // Second entry, end of list.
+        xdr.u32(0x0006_07AF);
+        xdr.u32(1);
+        xdr.u32(IPPROTO_TCP);
+        xdr.u32(1024);
+        xdr.bool(false);
+        let reply = xdr.into_bytes();
+        let result = parse_reply(&reply, Some(1)).unwrap();
+        let mut reader = XdrReader::new(&result);
+        let mappings = parse_pmaplist(&mut reader).unwrap();
+        assert_eq!(mappings.len(), 2);
+        assert_eq!(mappings[1].prog, 0x0006_07AF);
+        assert_eq!(mappings[1].port, 1024);
     }
 
     #[test]

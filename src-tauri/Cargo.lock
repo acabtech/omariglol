@@ -2385,7 +2385,6 @@ dependencies = [
  "base64 0.22.1",
  "rand",
  "serde",
- "serde_json",
  "socket2 0.5.10",
  "thiserror 2.0.21",
 ]

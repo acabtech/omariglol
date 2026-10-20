@@ -61,14 +61,34 @@ export type ScriptEvent =
   | { kind: "sample"; series: string; value: number }
   | { kind: "status"; message: string };
 
-/** The GUI modes, matching lxi-tools' five. */
-export type Mode = "search" | "scpi" | "screenshot" | "benchmark" | "script";
+/**
+ * The workbench sections, in scroll order.
+ *
+ * The app is a single flowing pane rather than a tabbed utility: every section
+ * is always mounted and reachable by scrolling, so no workflow is hidden
+ * behind a tab switch.
+ */
+export interface SectionMeta {
+  /** DOM id, used as the scroll anchor. */
+  id: string;
+  /** Label shown in the section navigation. */
+  label: string;
+}
 
-/** Display metadata for the mode switcher. */
-export const MODES: ReadonlyArray<{ id: Mode; label: string }> = [
-  { id: "search", label: "Search" },
-  { id: "scpi", label: "SCPI" },
+/** Display metadata for the section navigation. */
+export const SECTIONS: ReadonlyArray<SectionMeta> = [
+  { id: "connection", label: "Connection" },
+  { id: "scpi", label: "SCPI Console" },
   { id: "screenshot", label: "Screenshot" },
   { id: "benchmark", label: "Benchmark" },
   { id: "script", label: "Script" },
 ];
+
+/** The section ids, as a stable array for the scroll-spy observer. */
+export const SECTION_IDS: ReadonlyArray<string> = SECTIONS.map((s) => s.id);
+
+/** Props every session-bound section receives from the application shell. */
+export interface SectionProps {
+  /** Scroll to the Connection section; used by the connect prompt (§3.3). */
+  onGoToConnection: () => void;
+}

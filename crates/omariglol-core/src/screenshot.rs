@@ -353,6 +353,10 @@ mod tests {
     const BMP: &[u8] = b"BM\x00\x00\x00\x00";
     const JPEG: &[u8] = &[0xff, 0xd8, 0xff, 0xe0, 0x00];
 
+    /// A real capture from a Rigol DS1054Z (800x480 PNG), used to prove the
+    /// block parser and format sniffer handle genuine instrument output.
+    const DS1054Z_SAMPLE: &[u8] = include_bytes!("../tests/fixtures/rigol-ds1054z.png");
+
     #[test]
     fn test_image_format_sniff_png() {
         assert_eq!(ImageFormat::sniff(PNG), ImageFormat::Png);
@@ -397,6 +401,12 @@ mod tests {
             "Rigol DS2000"
         );
         assert_eq!(
+            profile_for_idn("RIGOL TECHNOLOGIES,DS4024,0,1.0")
+                .unwrap()
+                .name,
+            "Rigol DS4000"
+        );
+        assert_eq!(
             profile_for_idn("KEYSIGHT TECHNOLOGIES,DSOX1102G,CN123,1.0")
                 .unwrap()
                 .name,
@@ -409,6 +419,33 @@ mod tests {
             "Rohde & Schwarz"
         );
         assert!(profile_for_idn("Some Other Vendor,Model,0,1.0").is_none());
+    }
+
+    #[test]
+    fn test_every_profile_matches_its_prefix() {
+        // Every profile must be reachable through `profile_for_idn` using its
+        // own first prefix, so adding a profile without a matching test fails.
+        for profile in PROFILES {
+            let idn = format!("{},MODEL,0,1.0", profile.idn_prefixes[0]);
+            let matched = profile_for_idn(&idn).unwrap_or_else(|| {
+                panic!("no profile matched prefix {:?}", profile.idn_prefixes[0])
+            });
+            assert_eq!(matched.name, profile.name);
+        }
+    }
+
+    #[test]
+    fn test_captured_sample_parses() {
+        // The instrument sends the image as a definite-length block: `#9`, nine
+        // length digits, then the payload. The captured sample must survive the
+        // round trip and still sniff as a PNG.
+        let mut block = format!("#9{:09}", DS1054Z_SAMPLE.len()).into_bytes();
+        block.extend_from_slice(DS1054Z_SAMPLE);
+
+        let parsed = parse_ieee_block(&block).expect("captured block should parse");
+        assert_eq!(parsed, DS1054Z_SAMPLE);
+        assert_eq!(ImageFormat::sniff(&parsed), ImageFormat::Png);
+        assert_eq!(declared_block_len(&block), Some(block.len()));
     }
 
     #[test]

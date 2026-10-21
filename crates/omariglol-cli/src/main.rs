@@ -252,6 +252,10 @@ pub struct BenchmarkArgs {
     #[arg(long)]
     pub raw: bool,
 
+    /// Override the port (e.g. 5555 for Rigol's raw SCPI socket).
+    #[arg(long, value_name = "PORT")]
+    pub port: Option<u16>,
+
     /// Emit JSON instead of a table.
     #[arg(long)]
     pub json: bool,
@@ -576,7 +580,10 @@ fn cmd_benchmark(args: BenchmarkArgs) -> anyhow::Result<()> {
     } else {
         Transport::Vxi11
     };
-    let target = Target::new(ip, transport_kind).with_timeout(Duration::from_secs(3));
+    let mut target = Target::new(ip, transport_kind).with_timeout(Duration::from_secs(3));
+    if let Some(port) = args.port {
+        target = target.with_port(port);
+    }
 
     let mut transport = transport::open(&target)?;
     vlog!(1, "connected: {}", transport.description());

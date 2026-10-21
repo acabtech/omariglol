@@ -494,7 +494,7 @@ fn ds1000z_commands() -> Vec<DriverCommand> {
             .described("measure", "Measure maximum voltage"),
         DriverCommand::new("measure_vmin", ":MEAS:VMIN?", true)
             .described("measure", "Measure minimum voltage"),
-        DriverCommand::new("measure_vavg", ":MEAS:VAV?", true)
+        DriverCommand::new("measure_vavg", ":MEAS:VAVG?", true)
             .described("measure", "Measure average voltage"),
         DriverCommand::new("measure_vrms", ":MEAS:VRMS?", true)
             .described("measure", "Measure RMS voltage"),
@@ -506,9 +506,9 @@ fn ds1000z_commands() -> Vec<DriverCommand> {
             .described("measure", "Measure frequency"),
         DriverCommand::new("measure_period", ":MEAS:PER?", true)
             .described("measure", "Measure period"),
-        DriverCommand::new("measure_rise_time", ":MEAS:RIS?", true)
+        DriverCommand::new("measure_rise_time", ":MEAS:RTIM?", true)
             .described("measure", "Measure rise time"),
-        DriverCommand::new("measure_fall_time", ":MEAS:FALL?", true)
+        DriverCommand::new("measure_fall_time", ":MEAS:FTIM?", true)
             .described("measure", "Measure fall time"),
         DriverCommand::new("measure_positive_width", ":MEAS:PWID?", true)
             .described("measure", "Measure positive pulse width"),
@@ -522,8 +522,6 @@ fn ds1000z_commands() -> Vec<DriverCommand> {
             .described("measure", "Measure overshoot"),
         DriverCommand::new("measure_preshoot", ":MEAS:PRES?", true)
             .described("measure", "Measure preshoot"),
-        DriverCommand::new("measure_all", ":MEAS:ALL?", true)
-            .described("measure", "Read every enabled measurement"),
         DriverCommand::new("measure_clear", ":MEAS:CLE", false)
             .described("measure", "Clear all measurements"),
     ]);
@@ -686,6 +684,19 @@ mod tests {
         assert_eq!(driver.command("measure_vpp").unwrap().scpi, ":MEAS:VPP?");
         assert!(driver.command("measure_vpp").unwrap().query);
         assert!(!driver.command("run").unwrap().query);
+        // The DS1000Z mnemonics verified against hardware: average is VAVG (not
+        // VAV), and rise/fall time are RTIM/FTIM (not RIS/FALL). There is no
+        // "read every measurement" query, so `measure_all` is not exposed.
+        assert_eq!(driver.command("measure_vavg").unwrap().scpi, ":MEAS:VAVG?");
+        assert_eq!(
+            driver.command("measure_rise_time").unwrap().scpi,
+            ":MEAS:RTIM?"
+        );
+        assert_eq!(
+            driver.command("measure_fall_time").unwrap().scpi,
+            ":MEAS:FTIM?"
+        );
+        assert!(driver.command("measure_all").is_none());
     }
 
     #[test]

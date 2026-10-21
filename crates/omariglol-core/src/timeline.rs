@@ -262,8 +262,8 @@ mod tests {
 
     #[test]
     fn test_event_with_data() {
-        let event = event(1, TimelineEventKind::Query, "q")
-            .with_data(serde_json::json!({ "value": 1.5 }));
+        let event =
+            event(1, TimelineEventKind::Query, "q").with_data(serde_json::json!({ "value": 1.5 }));
         assert_eq!(event.data.unwrap()["value"], 1.5);
     }
 

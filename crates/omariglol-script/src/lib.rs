@@ -406,42 +406,36 @@ mod tests {
 
     #[test]
     fn test_workspace_create_and_run() {
-        let (result, _) = run(
-            "from omariglol import Workspace\n\
+        let (result, _) = run("from omariglol import Workspace\n\
              ws = Workspace.create('test-ws')\n\
              assert ws.name == 'test-ws', ws.name\n\
              with ws.run('demo') as run:\n\
              \x20   run.record(step=1, value=2.5)\n\
              assert ws.timeline_len >= 2, ws.timeline_len\n\
-             print('ok')\n",
-        );
+             print('ok')\n");
         assert!(result.is_ok(), "{result:?}");
     }
 
     #[test]
     fn test_workspace_define_preset_and_rule() {
-        let (result, _) = run(
-            "from omariglol import Workspace\n\
+        let (result, _) = run("from omariglol import Workspace\n\
              ws = Workspace.create('test-ws')\n\
              ws.define_preset('P', {'scope': [':RUN', ':STOP']})\n\
              ws.define_rule('R', 'scope', ':MEAS:FREQ?', 1000.0, 'scope', ':STOP')\n\
-             print('ok')\n",
-        );
+             print('ok')\n");
         assert!(result.is_ok(), "{result:?}");
     }
 
     #[test]
     fn test_workspace_discovery_api() {
-        let (result, _) = run(
-            "from omariglol import Workspace\n\
+        let (result, _) = run("from omariglol import Workspace\n\
              ws = Workspace.create('test-ws')\n\
              cfg = ws.network_config()\n\
              assert 'online' in cfg, cfg\n\
              assert ws.available_instruments() == [], ws.available_instruments()\n\
              assert ws.find_by_model('ds1054') == []\n\
              assert ws.find_by_capability('run') == []\n\
-             print('ok')\n",
-        );
+             print('ok')\n");
         assert!(result.is_ok(), "{result:?}");
     }
 

@@ -32,7 +32,9 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use crate::device::Device;
-use crate::discovery::{self, ProbeResult, DEFAULT_SCAN_CONCURRENCY, PROBE_TIMEOUT, SCPI_PROBE_PORTS};
+use crate::discovery::{
+    self, DEFAULT_SCAN_CONCURRENCY, PROBE_TIMEOUT, ProbeResult, SCPI_PROBE_PORTS,
+};
 use crate::driver::InstrumentDriver;
 use crate::netconfig::{self, NetworkConfig};
 use crate::workspace::now_millis;
@@ -118,7 +120,9 @@ impl CachedInstrument {
 
     /// True when the model contains `needle` (case-insensitive).
     pub fn matches_model(&self, needle: &str) -> bool {
-        self.model.to_ascii_lowercase().contains(&needle.to_ascii_lowercase())
+        self.model
+            .to_ascii_lowercase()
+            .contains(&needle.to_ascii_lowercase())
     }
 
     /// True when the entry exposes a named capability.
@@ -400,9 +404,7 @@ impl DiscoveryEngine {
             })
         });
         let mdns_handle = options.use_mdns.then(|| {
-            std::thread::spawn(move || {
-                discovery::discover_mdns(listen_timeout).unwrap_or_default()
-            })
+            std::thread::spawn(move || discovery::discover_mdns(listen_timeout).unwrap_or_default())
         });
 
         // 3. Build the host list for direct probing.
@@ -699,11 +701,14 @@ mod tests {
         let cache = Arc::new(Mutex::new(DiscoveryCache::new(300)));
         let a = DiscoveryEngine::with_cache(cache.clone());
         let b = DiscoveryEngine::with_cache(cache.clone());
-        a.cache().lock().unwrap().insert(CachedInstrument::from_probe(
-            &probe("192.168.1.50", "RIGOL TECHNOLOGIES,DS1054Z,SN,1.0"),
-            None,
-            300,
-        ));
+        a.cache()
+            .lock()
+            .unwrap()
+            .insert(CachedInstrument::from_probe(
+                &probe("192.168.1.50", "RIGOL TECHNOLOGIES,DS1054Z,SN,1.0"),
+                None,
+                300,
+            ));
         assert_eq!(b.cache().lock().unwrap().len(), 1);
     }
 }

@@ -38,9 +38,9 @@ use omariglol_core::instrument::InstrumentId;
 use omariglol_core::preset::Preset;
 use omariglol_core::rule::{Comparison, EvaluationMode, Rule};
 use omariglol_core::timeline::{TimelineEvent, TimelineEventKind};
-use omariglol_core::transport::{parse_address, Session};
+use omariglol_core::transport::{Session, parse_address};
 use omariglol_core::trigger::Trigger;
-use omariglol_core::workspace::{now_millis, Workspace as CoreWorkspace};
+use omariglol_core::workspace::{Workspace as CoreWorkspace, now_millis};
 
 use crate::context;
 
@@ -71,13 +71,15 @@ impl WorkspaceData {
     }
 
     /// Record a timeline event.
-    fn record(&mut self, instrument: Option<InstrumentId>, kind: TimelineEventKind, message: String) {
-        self.inner.timeline.record(TimelineEvent::new(
-            now_millis(),
-            instrument,
-            kind,
-            message,
-        ));
+    fn record(
+        &mut self,
+        instrument: Option<InstrumentId>,
+        kind: TimelineEventKind,
+        message: String,
+    ) {
+        self.inner
+            .timeline
+            .record(TimelineEvent::new(now_millis(), instrument, kind, message));
     }
 }
 
@@ -184,7 +186,11 @@ impl WorkspaceInstrument {
     }
 
     /// Send a query and return the raw response bytes.
-    fn query_raw<'py>(&self, py: Python<'py>, command: &str) -> PyResult<Bound<'py, pyo3::types::PyBytes>> {
+    fn query_raw<'py>(
+        &self,
+        py: Python<'py>,
+        command: &str,
+    ) -> PyResult<Bound<'py, pyo3::types::PyBytes>> {
         context::checkpoint().map_err(crate::module::script_err_to_py)?;
         let mut data = self.data.lock().unwrap();
         let session = data
@@ -369,10 +375,7 @@ impl Workspace {
     fn open(name: &str, dir: Option<PathBuf>) -> PyResult<Self> {
         let dir = dir.unwrap_or_else(default_dir);
         let workspace = load_workspace(&dir, name).ok_or_else(|| {
-            PyKeyError::new_err(format!(
-                "no workspace '{name}' in {}",
-                dir.display()
-            ))
+            PyKeyError::new_err(format!("no workspace '{name}' in {}", dir.display()))
         })?;
         Ok(Workspace::from_core(workspace, Some(dir)))
     }
@@ -653,12 +656,7 @@ impl Workspace {
                 )));
             }
         };
-        let mut rule = Rule::new(
-            format!("rule-{}", now_millis()),
-            name,
-            source_id,
-            target_id,
-        );
+        let mut rule = Rule::new(format!("rule-{}", now_millis()), name, source_id, target_id);
         rule.query = query.to_string();
         rule.comparison = comparison;
         rule.threshold = threshold;
@@ -963,7 +961,9 @@ fn python_to_json(value: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
     if let Ok(s) = value.extract::<String>() {
         return Ok(serde_json::Value::String(s));
     }
-    Ok(serde_json::Value::String(value.str()?.to_string_lossy().into_owned()))
+    Ok(serde_json::Value::String(
+        value.str()?.to_string_lossy().into_owned(),
+    ))
 }
 
 /// Register the workspace classes with the `omariglol` module.

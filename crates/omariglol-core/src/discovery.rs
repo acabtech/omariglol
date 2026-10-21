@@ -490,11 +490,7 @@ pub fn identify_tcp(address: IpAddr, port: u16, timeout: Duration) -> Option<Str
 }
 
 /// Probe one host on each candidate port, returning the first that answers.
-pub fn probe_scpi_tcp(
-    address: IpAddr,
-    ports: &[u16],
-    timeout: Duration,
-) -> Option<ProbeResult> {
+pub fn probe_scpi_tcp(address: IpAddr, ports: &[u16], timeout: Duration) -> Option<ProbeResult> {
     for &port in ports {
         if let Some(idn) = identify_tcp(address, port, timeout) {
             let mut device = Device::manual(address);

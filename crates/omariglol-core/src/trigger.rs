@@ -100,10 +100,7 @@ pub enum TriggerError {
 ///
 /// The graph is a set of `source -> target` edges. Adding an edge is safe when
 /// the target cannot already reach the source. A self-loop is always rejected.
-pub fn validate_edge(
-    existing: &[Trigger],
-    candidate: &Trigger,
-) -> Result<(), TriggerError> {
+pub fn validate_edge(existing: &[Trigger], candidate: &Trigger) -> Result<(), TriggerError> {
     if candidate.source == candidate.target {
         return Err(TriggerError::SelfLoop);
     }
@@ -163,10 +160,7 @@ mod tests {
     #[test]
     fn test_validate_rejects_self_loop() {
         let candidate = edge("t1", "a", "a");
-        assert_eq!(
-            validate_edge(&[], &candidate),
-            Err(TriggerError::SelfLoop)
-        );
+        assert_eq!(validate_edge(&[], &candidate), Err(TriggerError::SelfLoop));
     }
 
     #[test]
@@ -186,14 +180,20 @@ mod tests {
     fn test_validate_rejects_direct_cycle() {
         let existing = vec![edge("t1", "gen", "scope")];
         let candidate = edge("t2", "scope", "gen");
-        assert_eq!(validate_edge(&existing, &candidate), Err(TriggerError::Cycle));
+        assert_eq!(
+            validate_edge(&existing, &candidate),
+            Err(TriggerError::Cycle)
+        );
     }
 
     #[test]
     fn test_validate_rejects_indirect_cycle() {
         let existing = vec![edge("t1", "a", "b"), edge("t2", "b", "c")];
         let candidate = edge("t3", "c", "a");
-        assert_eq!(validate_edge(&existing, &candidate), Err(TriggerError::Cycle));
+        assert_eq!(
+            validate_edge(&existing, &candidate),
+            Err(TriggerError::Cycle)
+        );
     }
 
     #[test]

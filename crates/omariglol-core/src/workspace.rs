@@ -145,7 +145,8 @@ impl Workspace {
             return false;
         }
         // Drop presets, rules and triggers that reference the removed instrument.
-        self.presets.retain(|preset| !preset.commands.contains_key(id));
+        self.presets
+            .retain(|preset| !preset.commands.contains_key(id));
         self.rules
             .retain(|rule| &rule.source != id && &rule.target != id);
         self.triggers
@@ -156,7 +157,9 @@ impl Workspace {
 
     /// Look up an instrument by id.
     pub fn instrument(&self, id: &InstrumentId) -> Option<&Instrument> {
-        self.instruments.iter().find(|instrument| &instrument.id == id)
+        self.instruments
+            .iter()
+            .find(|instrument| &instrument.id == id)
     }
 
     /// Look up an instrument mutably by id.
@@ -449,13 +452,8 @@ mod tests {
             .add_trigger(Trigger::new("t1", a.clone(), b.clone(), "*OPC?", ":INIT"))
             .unwrap();
         // The reverse edge would create a cycle.
-        let result = workspace.add_trigger(Trigger::new(
-            "t2",
-            b.clone(),
-            a.clone(),
-            "*OPC?",
-            ":INIT",
-        ));
+        let result =
+            workspace.add_trigger(Trigger::new("t2", b.clone(), a.clone(), "*OPC?", ":INIT"));
         assert_eq!(result, Err(TriggerError::Cycle));
         assert_eq!(workspace.triggers.len(), 1);
     }

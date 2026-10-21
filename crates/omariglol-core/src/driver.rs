@@ -77,16 +77,31 @@ pub fn classify_idn(idn: &str) -> InstrumentType {
         return InstrumentType::Unknown;
     }
 
-    const OSCILLOSCOPE: &[&str] = &["DSO", "MSO", "DS1", "DS2", "DS4", "DS6", "DSOX", "WAVESURFER"];
+    const OSCILLOSCOPE: &[&str] = &[
+        "DSO",
+        "MSO",
+        "DS1",
+        "DS2",
+        "DS4",
+        "DS6",
+        "DSOX",
+        "WAVESURFER",
+    ];
     const POWER_SUPPLY: &[&str] = &["N6705", "E363", "DP8", "DP7", "DP9", "PSU", "PWR"];
     const GENERATOR: &[&str] = &["33500", "33600", "AFG", "DG1", "DG4", "DG8", "SMB", "SMW"];
     const MULTIMETER: &[&str] = &["34401", "34410", "3446", "DMM", "DM3", "DM8"];
-    const SPECTRUM: &[&str] = &["N9020", "N9010", "FSW", "FSU", "FSP", "RSA", "DSA8", "SPECTRUM"];
+    const SPECTRUM: &[&str] = &[
+        "N9020", "N9010", "FSW", "FSU", "FSP", "RSA", "DSA8", "SPECTRUM",
+    ];
     const LOAD: &[&str] = &["N3300", "DL3", "EL3", "LOAD"];
     const SWITCH: &[&str] = &["34970", "34980", "SWITCH", "MUX"];
 
     let model = idn_model(&upper);
-    let haystack = if model.is_empty() { upper.as_str() } else { model.as_str() };
+    let haystack = if model.is_empty() {
+        upper.as_str()
+    } else {
+        model.as_str()
+    };
 
     let matches = |prefixes: &[&str]| prefixes.iter().any(|p| haystack.contains(p));
 
@@ -230,10 +245,7 @@ impl InstrumentDriver {
 
     /// The commands in a group.
     pub fn commands_in_group(&self, group: &str) -> Vec<&DriverCommand> {
-        self.commands
-            .iter()
-            .filter(|c| c.group == group)
-            .collect()
+        self.commands.iter().filter(|c| c.group == group).collect()
     }
 }
 
@@ -257,19 +269,26 @@ fn generic_commands(instrument_type: InstrumentType) -> Vec<DriverCommand> {
         }
         InstrumentType::PowerSupply => {
             commands.extend([
-                DriverCommand::new("set_voltage", ":VOLT", false).described("output", "Set voltage"),
-                DriverCommand::new("read_voltage", ":VOLT?", true).described("output", "Read voltage"),
-                DriverCommand::new("set_current", ":CURR", false).described("output", "Set current"),
+                DriverCommand::new("set_voltage", ":VOLT", false)
+                    .described("output", "Set voltage"),
+                DriverCommand::new("read_voltage", ":VOLT?", true)
+                    .described("output", "Read voltage"),
+                DriverCommand::new("set_current", ":CURR", false)
+                    .described("output", "Set current"),
                 DriverCommand::new("output_on", ":OUTP ON", false).described("output", "Output on"),
-                DriverCommand::new("output_off", ":OUTP OFF", false).described("output", "Output off"),
+                DriverCommand::new("output_off", ":OUTP OFF", false)
+                    .described("output", "Output off"),
             ]);
         }
         InstrumentType::SignalGenerator => {
             commands.extend([
-                DriverCommand::new("set_frequency", ":FREQ", false).described("output", "Set frequency"),
-                DriverCommand::new("set_amplitude", ":VOLT", false).described("output", "Set amplitude"),
+                DriverCommand::new("set_frequency", ":FREQ", false)
+                    .described("output", "Set frequency"),
+                DriverCommand::new("set_amplitude", ":VOLT", false)
+                    .described("output", "Set amplitude"),
                 DriverCommand::new("output_on", ":OUTP ON", false).described("output", "Output on"),
-                DriverCommand::new("output_off", ":OUTP OFF", false).described("output", "Output off"),
+                DriverCommand::new("output_off", ":OUTP OFF", false)
+                    .described("output", "Output off"),
             ]);
         }
         InstrumentType::Multimeter => {
@@ -314,7 +333,8 @@ fn generic_commands(instrument_type: InstrumentType) -> Vec<DriverCommand> {
 /// The IEEE-488.2 common commands every instrument supports.
 fn standard_commands() -> Vec<DriverCommand> {
     vec![
-        DriverCommand::new("identify", "*IDN?", true).described("system", "Identify the instrument"),
+        DriverCommand::new("identify", "*IDN?", true)
+            .described("system", "Identify the instrument"),
         DriverCommand::new("reset", "*RST", false).described("system", "Reset to defaults"),
         DriverCommand::new("clear_status", "*CLS", false).described("system", "Clear status"),
         DriverCommand::new("operation_complete", "*OPC?", true)
@@ -358,7 +378,8 @@ fn ds1000z_commands() -> Vec<DriverCommand> {
         DriverCommand::new("run", ":RUN", false).described("acquire", "Start acquisition"),
         DriverCommand::new("stop", ":STOP", false).described("acquire", "Stop acquisition"),
         DriverCommand::new("single", ":SING", false).described("acquire", "Single sweep"),
-        DriverCommand::new("autoscale", ":AUT", false).described("acquire", "Auto-scale all channels"),
+        DriverCommand::new("autoscale", ":AUT", false)
+            .described("acquire", "Auto-scale all channels"),
         DriverCommand::new("force_trigger", ":TFOR", false).described("acquire", "Force a trigger"),
         DriverCommand::new("acquire_type", ":ACQ:TYPE", false)
             .described("acquire", "Set acquisition type (NORM/AVER/PEAK/HRES)"),
@@ -372,8 +393,10 @@ fn ds1000z_commands() -> Vec<DriverCommand> {
 
     // --- Trigger configuration ----------------------------------------------
     commands.extend([
-        DriverCommand::new("trigger_mode", ":TRIG:MODE", false)
-            .described("trigger", "Set trigger mode (EDGE/PULS/RUNT/WIND/NEDG/SLOP/VIDEO/PATT/DUR)"),
+        DriverCommand::new("trigger_mode", ":TRIG:MODE", false).described(
+            "trigger",
+            "Set trigger mode (EDGE/PULS/RUNT/WIND/NEDG/SLOP/VIDEO/PATT/DUR)",
+        ),
         DriverCommand::new("trigger_status", ":TRIG:STAT?", true)
             .described("trigger", "Read trigger status (TD/RUN/WAIT/AUTO/STOP)"),
         DriverCommand::new("trigger_sweep", ":TRIG:SWE", false)
@@ -648,9 +671,18 @@ mod tests {
         assert_eq!(driver.command("stop").unwrap().scpi, ":STOP");
         assert_eq!(driver.command("single").unwrap().scpi, ":SING");
         assert_eq!(driver.command("autoscale").unwrap().scpi, ":AUT");
-        assert_eq!(driver.command("channel1_scale").unwrap().scpi, ":CHAN1:SCAL");
-        assert_eq!(driver.command("channel4_offset").unwrap().scpi, ":CHAN4:OFFS");
-        assert_eq!(driver.command("trigger_edge_level").unwrap().scpi, ":TRIG:EDGE:LEV");
+        assert_eq!(
+            driver.command("channel1_scale").unwrap().scpi,
+            ":CHAN1:SCAL"
+        );
+        assert_eq!(
+            driver.command("channel4_offset").unwrap().scpi,
+            ":CHAN4:OFFS"
+        );
+        assert_eq!(
+            driver.command("trigger_edge_level").unwrap().scpi,
+            ":TRIG:EDGE:LEV"
+        );
         assert_eq!(driver.command("measure_vpp").unwrap().scpi, ":MEAS:VPP?");
         assert!(driver.command("measure_vpp").unwrap().query);
         assert!(!driver.command("run").unwrap().query);
@@ -660,8 +692,13 @@ mod tests {
     fn test_driver_groups() {
         let driver = InstrumentDriver::from_idn("RIGOL TECHNOLOGIES,DS1054Z,SN,1.0");
         let groups = driver.groups();
-        for expected in ["system", "acquire", "trigger", "channel1", "timebase", "measure", "waveform"] {
-            assert!(groups.contains(&expected.to_string()), "missing group {expected}");
+        for expected in [
+            "system", "acquire", "trigger", "channel1", "timebase", "measure", "waveform",
+        ] {
+            assert!(
+                groups.contains(&expected.to_string()),
+                "missing group {expected}"
+            );
         }
         assert!(!driver.commands_in_group("trigger").is_empty());
     }

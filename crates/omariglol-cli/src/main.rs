@@ -23,9 +23,9 @@ use omariglol_core::discovery_engine::{
 };
 use omariglol_core::driver::InstrumentDriver;
 use omariglol_core::netconfig;
+use omariglol_core::screenshot;
 use omariglol_core::transport::{self, Session, parse_address, to_hex};
 use omariglol_core::workspace::WorkspaceManager;
-use omariglol_core::screenshot;
 use omariglol_script::{ScriptEngine, ScriptEvent, ScriptOptions};
 
 /// Process-wide verbosity, set once from the global `-v` flag.

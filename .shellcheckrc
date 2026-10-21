@@ -1,0 +1,9 @@
+# ShellCheck configuration for the repository.
+#
+# The example scripts source a shared helper via a `$(dirname "$0")/common.sh`
+# command substitution, which ShellCheck cannot resolve on its own. Each script
+# carries a `# shellcheck source=common.sh` directive, and these two settings let
+# ShellCheck follow it: `external-sources` enables following, and
+# `source-path=SCRIPTDIR` searches the script's own directory for the file.
+external-sources=true
+source-path=SCRIPTDIR

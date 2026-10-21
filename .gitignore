@@ -12,6 +12,9 @@ dist/
 dist-ssr/
 *.local
 
+# Documentation site (see site/build.py, site/deploy.sh)
+.venv-site/
+
 # Plans
 plans/
 

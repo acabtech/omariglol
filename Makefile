@@ -17,7 +17,7 @@ BINARIES := riglol
 # it builds into its own target directory.
 APP_BIN := src-tauri/target/release/omariglol
 
-.PHONY: all build debug app test lint fmt check clean help
+.PHONY: all build debug app test lint fmt check clean site deploy-site help
 
 all: build
 
@@ -73,6 +73,14 @@ check:
 clean:
 	$(CARGO) clean
 	rm -rf $(BIN_DIR)
+
+## site: build the documentation site into site/dist
+site:
+	@if [ -x .venv-site/bin/python ]; then .venv-site/bin/python site/build.py; else python3 site/build.py; fi
+
+## deploy-site: build and deploy the documentation site (DEST=/path/to/webroot)
+deploy-site:
+	site/deploy.sh $(DEST)
 
 ## help: list the available targets
 help:

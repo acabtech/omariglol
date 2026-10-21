@@ -15,6 +15,9 @@ dist-ssr/
 # Plans
 plans/
 
+# Legacy binaries kept locally for personal comparison only
+old-bins/
+
 # Tauri
 src-tauri/target/
 src-tauri/gen/

@@ -26,6 +26,8 @@ The whole instrument-facing surface. Module map:
 | `transport::rpc` | ONC RPC client, XDR codec, portmapper (`GETPORT`, `DUMP`) |
 | `transport::vxi11` | VXI-11 `device_core` channel: `create_link`, `device_write`, `device_read`, … |
 | `transport::raw` | LXI raw socket on TCP 5025 |
+| `usb` | USB abstraction: `UsbId`, `UsbSelector`, enumeration, driver registry |
+| `usb::usbtmc` | USBTMC transport, implementing `ScpiTransport` |
 | `transport` | `ScpiTransport` trait and the `Session` convenience wrapper |
 | `connection` | A live connection with health and statistics tracking |
 | `instrument` | `Instrument`, `InstrumentId`, `InstrumentState` and configuration |

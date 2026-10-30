@@ -8,6 +8,12 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 
+[features]
+default = []
+# Enable the USBTMC / SUMP USB backend. Off by default so the core still builds
+# (and CI still passes) on machines without the libusb-1.0 system library.
+usb = ["dep:rusb"]
+
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -15,3 +21,4 @@ thiserror = { workspace = true }
 base64 = { workspace = true }
 rand = { workspace = true }
 socket2 = { workspace = true }
+rusb = { workspace = true, optional = true }

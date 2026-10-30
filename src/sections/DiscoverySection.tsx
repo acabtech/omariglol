@@ -292,6 +292,7 @@ export default function DiscoverySection() {
             >
               <option value="vxi11">vxi11</option>
               <option value="raw">raw</option>
+              <option value="usb">usb</option>
             </Select>
           </Field>
           <Field label="Port" htmlFor="discovery-manual-port" help="Blank uses the default.">

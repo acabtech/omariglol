@@ -110,7 +110,9 @@ pub struct InstrumentConfig {
 impl InstrumentConfig {
     /// A configuration for a device, choosing the transport it advertises.
     pub fn for_device(device: &Device) -> Self {
-        let transport = if device.vxi11_port.is_some() {
+        let transport = if device.usb.is_some() {
+            Transport::Usb
+        } else if device.vxi11_port.is_some() {
             Transport::Vxi11
         } else {
             Transport::Raw
@@ -118,6 +120,7 @@ impl InstrumentConfig {
         let port = match transport {
             Transport::Vxi11 => device.vxi11_port,
             Transport::Raw => device.raw_port,
+            Transport::Usb => None,
         };
         InstrumentConfig {
             transport,

@@ -1,11 +1,12 @@
 //! The instrument model shared by the CLI, the GUI and the shell plugin.
 
 use std::fmt;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::{Error, Result};
 use crate::transport::raw::DEFAULT_RAW_PORT;
 
 /// The portmapper port, dialed to resolve the VXI-11 core channel.
@@ -27,6 +28,8 @@ pub enum DiscoveryMethod {
     Mdns,
     /// A direct SCPI `*IDN?` probe over TCP on a known or scanned address.
     ScpiTcp,
+    /// Enumeration of the local USB bus.
+    Usb,
     /// Typed in by hand because the instrument is on another subnet.
     Manual,
 }
@@ -38,8 +41,90 @@ impl fmt::Display for DiscoveryMethod {
             DiscoveryMethod::Mdns => "mdns",
             DiscoveryMethod::ScpiTcp => "scpi-tcp",
             DiscoveryMethod::Manual => "manual",
+            DiscoveryMethod::Usb => "usb",
         };
         f.write_str(name)
+    }
+}
+
+/// How to find a USB instrument: by vendor/product id, optionally pinned to a
+/// serial number or a bus/device pair when several identical units are attached.
+///
+/// The `usb:0xVVVV:0xPPPP[:SERIAL|BUS.ADDR]` display form round-trips through
+/// [`UsbSelector::to_string`] and [`UsbSelector::parse`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UsbSelector {
+    /// USB vendor id.
+    pub vendor: u16,
+    /// USB product id.
+    pub product: u16,
+    /// Serial number, to disambiguate identical models.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub serial: Option<String>,
+    /// Explicit bus number, when set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bus: Option<u8>,
+    /// Explicit device address on `bus`, when set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address: Option<u8>,
+}
+
+impl UsbSelector {
+    /// A selector keyed only on the vendor/product pair.
+    pub fn new(vendor: u16, product: u16) -> Self {
+        Self {
+            vendor,
+            product,
+            serial: None,
+            bus: None,
+            address: None,
+        }
+    }
+
+    /// Pin the selector to a serial number.
+    pub fn with_serial(mut self, serial: impl Into<String>) -> Self {
+        self.serial = Some(serial.into());
+        self
+    }
+
+    /// Parse the `usb:0xVVVV:0xPPPP[:SERIAL|BUS.ADDR]` address form.
+    ///
+    /// The ids accept both `0x`-prefixed hexadecimal and plain decimal.
+    pub fn parse(input: &str) -> Option<Self> {
+        let rest = input.strip_prefix("usb:")?;
+        let mut parts = rest.split(':');
+        let vendor = parse_u16(parts.next()?)?;
+        let product = parse_u16(parts.next()?)?;
+        let mut selector = Self::new(vendor, product);
+        if let Some(tail) = parts.next() {
+            if let Some((bus, addr)) = tail.split_once('.') {
+                selector.bus = bus.parse().ok();
+                selector.address = addr.parse().ok();
+            } else if !tail.is_empty() {
+                selector.serial = Some(tail.to_string());
+            }
+        }
+        Some(selector)
+    }
+}
+
+fn parse_u16(token: &str) -> Option<u16> {
+    let token = token.trim();
+    match token.strip_prefix("0x").or_else(|| token.strip_prefix("0X")) {
+        Some(hex) => u16::from_str_radix(hex, 16).ok(),
+        None => token.parse().ok(),
+    }
+}
+
+impl fmt::Display for UsbSelector {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "usb:0x{:04X}:0x{:04X}", self.vendor, self.product)?;
+        if let Some(serial) = &self.serial {
+            write!(f, ":{serial}")?;
+        } else if let (Some(bus), Some(addr)) = (self.bus, self.address) {
+            write!(f, ":{bus}.{addr}")?;
+        }
+        Ok(())
     }
 }
 
@@ -47,7 +132,13 @@ impl fmt::Display for DiscoveryMethod {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Device {
     /// Primary IPv4 address of the instrument.
+    ///
+    /// For a USB instrument this is the unspecified address `0.0.0.0`; use
+    /// [`Device::usb`] instead of poking at it.
     pub address: IpAddr,
+    /// USB selector, when the instrument is reached over USBTMC.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usb: Option<UsbSelector>,
     /// Address as the user typed it, when the entry is manual.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hostname: Option<String>,
@@ -76,6 +167,7 @@ impl Device {
     pub fn manual(address: IpAddr) -> Self {
         Self {
             address,
+            usb: None,
             hostname: None,
             vxi11_port: None,
             raw_port: None,
@@ -85,8 +177,43 @@ impl Device {
         }
     }
 
+    /// Build a manual device entry for a USB instrument.
+    pub fn usb(selector: UsbSelector) -> Self {
+        Self {
+            address: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            usb: Some(selector),
+            hostname: None,
+            vxi11_port: None,
+            raw_port: None,
+            mdns_name: None,
+            device_name: default_device_name(),
+            method: DiscoveryMethod::Manual,
+        }
+    }
+
+    /// Build a device from a user-supplied address and transport.
+    ///
+    /// A USB address uses the `usb:0xVVVV:0xPPPP[:SERIAL|BUS.ADDR]` form; any
+    /// other address is resolved as an IPv4 address or hostname.
+    pub fn from_address(address: &str, transport: Transport) -> Result<Self> {
+        if transport == Transport::Usb {
+            let selector = UsbSelector::parse(address).ok_or_else(|| {
+                Error::Addr(format!(
+                    "invalid USB address '{address}' \
+                     (expected usb:0xVVVV:0xPPPP[:SERIAL])"
+                ))
+            })?;
+            return Ok(Self::usb(selector));
+        }
+        let ip = crate::transport::parse_address(address)?;
+        Ok(Self::manual(ip))
+    }
+
     /// The address in `lxi`'s display form: `IP (hostname)` when known.
     pub fn display_address(&self) -> String {
+        if let Some(selector) = &self.usb {
+            return selector.to_string();
+        }
         match &self.hostname {
             Some(hostname) => format!("{} ({})", self.address, hostname),
             None => self.address.to_string(),
@@ -98,6 +225,9 @@ impl Device {
     /// Prefers the mDNS instance name, then a resolved hostname, and finally
     /// falls back to the bare IP address.
     pub fn label(&self) -> String {
+        if let Some(selector) = &self.usb {
+            return selector.to_string();
+        }
         if let Some(name) = self.mdns_name.as_deref() {
             return name.to_string();
         }
@@ -122,6 +252,8 @@ pub enum Transport {
     Vxi11,
     /// SCPI on a raw TCP socket, port 5025 by convention.
     Raw,
+    /// SCPI over USBTMC on a local USB instrument.
+    Usb,
 }
 
 impl fmt::Display for Transport {
@@ -129,6 +261,7 @@ impl fmt::Display for Transport {
         let name = match self {
             Transport::Vxi11 => "vxi11",
             Transport::Raw => "raw",
+            Transport::Usb => "usb",
         };
         f.write_str(name)
     }
@@ -141,6 +274,8 @@ pub struct Target {
     pub transport: Transport,
     /// Overrides the transport's default port when set.
     pub port: Option<u16>,
+    /// USB selector, when `transport` is [`Transport::Usb`].
+    pub usb: Option<UsbSelector>,
     pub device_name: String,
     /// Socket timeout applied to connect/read/write.
     pub timeout: Duration,
@@ -152,6 +287,19 @@ impl Target {
             address,
             transport,
             port: None,
+            usb: None,
+            device_name: default_device_name(),
+            timeout: DEFAULT_TIMEOUT,
+        }
+    }
+
+    /// Build a target for a USB (USBTMC) instrument.
+    pub fn usb(selector: UsbSelector) -> Self {
+        Self {
+            address: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            transport: Transport::Usb,
+            port: None,
+            usb: Some(selector),
             device_name: default_device_name(),
             timeout: DEFAULT_TIMEOUT,
         }
@@ -176,6 +324,8 @@ impl Target {
         self.port.unwrap_or(match self.transport {
             Transport::Vxi11 => DEFAULT_VXI11_PORT,
             Transport::Raw => DEFAULT_RAW_PORT,
+            // USB has no port; the value is never dialed.
+            Transport::Usb => 0,
         })
     }
 
@@ -188,11 +338,13 @@ impl Target {
         let port = match transport {
             Transport::Vxi11 => device.vxi11_port,
             Transport::Raw => device.raw_port,
+            Transport::Usb => None,
         };
         Self {
             address: device.address,
             transport,
             port,
+            usb: device.usb.clone(),
             device_name: device.device_name.clone(),
             timeout: DEFAULT_TIMEOUT,
         }
@@ -261,6 +413,50 @@ mod tests {
     fn test_transport_display() {
         assert_eq!(Transport::Vxi11.to_string(), "vxi11");
         assert_eq!(Transport::Raw.to_string(), "raw");
+        assert_eq!(Transport::Usb.to_string(), "usb");
+    }
+
+    #[test]
+    fn test_usb_selector_parse_roundtrip() {
+        let selector = UsbSelector::parse("usb:0x1AB1:0x04CE:DS1ZA123").unwrap();
+        assert_eq!(selector.vendor, 0x1AB1);
+        assert_eq!(selector.product, 0x04CE);
+        assert_eq!(selector.serial.as_deref(), Some("DS1ZA123"));
+        assert_eq!(selector.to_string(), "usb:0x1AB1:0x04CE:DS1ZA123");
+    }
+
+    #[test]
+    fn test_usb_selector_parse_decimal_and_bus_address() {
+        // 6833 == 0x1AB1, 1230 == 0x04CE.
+        let selector = UsbSelector::parse("usb:6833:1230:1.14").unwrap();
+        assert_eq!(selector.vendor, 0x1AB1);
+        assert_eq!(selector.product, 0x04CE);
+        assert_eq!(selector.bus, Some(1));
+        assert_eq!(selector.address, Some(14));
+        assert_eq!(selector.to_string(), "usb:0x1AB1:0x04CE:1.14");
+    }
+
+    #[test]
+    fn test_usb_selector_parse_rejects_garbage() {
+        assert!(UsbSelector::parse("192.168.1.50").is_none());
+        assert!(UsbSelector::parse("usb:nothex:0x04CE").is_none());
+    }
+
+    #[test]
+    fn test_target_usb() {
+        let target = Target::usb(UsbSelector::new(0x1AB1, 0x04CE));
+        assert_eq!(target.transport, Transport::Usb);
+        assert_eq!(target.effective_port(), 0);
+        assert_eq!(target.usb, Some(UsbSelector::new(0x1AB1, 0x04CE)));
+    }
+
+    #[test]
+    fn test_device_from_address_usb() {
+        let device = Device::from_address("usb:0x1AB1:0x04CE", Transport::Usb).unwrap();
+        assert!(device.usb.is_some());
+        assert_eq!(device.label(), "usb:0x1AB1:0x04CE");
+        // A malformed USB address is rejected rather than silently ignored.
+        assert!(Device::from_address("192.168.1.50", Transport::Usb).is_err());
     }
 
     #[test]

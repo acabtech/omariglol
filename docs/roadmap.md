@@ -1,5 +1,37 @@
 # Roadmap
 
+## 0.1.3 → 0.1.6 — SCPI over USB
+
+USB work is pulled forward out of 0.2.0. The full plan is in
+[`plans/0.1.3-usb-scpi.md`](../plans/0.1.3-usb-scpi.md).
+
+### 0.1.3 — Rigol DS1054Z over USBTMC
+
+- [x] `usb` — `UsbId`, `UsbSelector`, enumeration, driver status
+- [x] `usb::backend` — rusb-backed bulk/control transfers, feature-gated
+- [x] `usb::usbtmc` — USBTMC framing, implementing `ScpiTransport`
+- [x] `Transport::Usb` and `usb:0xVVVV:0xPPPP[:SERIAL]` addressing
+- [x] `riglol scpi|screenshot|benchmark|driver --usb`
+- [x] `riglol usb list`
+- [x] Linux udev rule and installer for libusb permissions
+- [ ] Hardware round-trip verification after the udev rule is installed
+
+### 0.1.4 — generic USBTMC and USB discovery
+
+- [ ] Any USBTMC-class instrument
+- [ ] Hotplug events
+- [ ] USB merged into discovery and the Discovery panel
+
+### 0.1.5 — SUMP capture
+
+- [ ] `usb::sump` for the Saleae clone
+- [ ] `capture` / `waveform` model and `riglol capture`
+
+### 0.1.6 — all targets over USB
+
+- [ ] NI USB-6001 and Sipeed SLogic16U3 stubs
+- [ ] Every listed device reachable (capture or a clear not-yet-implemented error)
+
 ## 0.1.0 — parity with lxi-tools
 
 The goal: someone who uses `lxi-tools` can switch and lose nothing, and gain

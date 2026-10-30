@@ -38,7 +38,7 @@ use omariglol_core::instrument::InstrumentId;
 use omariglol_core::preset::Preset;
 use omariglol_core::rule::{Comparison, EvaluationMode, Rule};
 use omariglol_core::timeline::{TimelineEvent, TimelineEventKind};
-use omariglol_core::transport::{Session, parse_address};
+use omariglol_core::transport::Session;
 use omariglol_core::trigger::Trigger;
 use omariglol_core::workspace::{Workspace as CoreWorkspace, now_millis};
 
@@ -454,17 +454,19 @@ impl Workspace {
         let kind = match transport {
             "vxi11" => Transport::Vxi11,
             "raw" => Transport::Raw,
+            "usb" => Transport::Usb,
             other => {
                 return Err(PyValueError::new_err(format!(
-                    "unknown transport '{other}' (expected 'vxi11' or 'raw')"
+                    "unknown transport '{other}' (expected 'vxi11', 'raw' or 'usb')"
                 )));
             }
         };
-        let ip = parse_address(address).map_err(to_pyerr)?;
-        let mut device = omariglol_core::device::Device::manual(ip);
+        let mut device =
+            omariglol_core::device::Device::from_address(address, kind).map_err(to_pyerr)?;
         match kind {
             Transport::Vxi11 => device.vxi11_port = port,
             Transport::Raw => device.raw_port = port,
+            Transport::Usb => {}
         }
 
         let mut data = self.data.lock().unwrap();
@@ -476,7 +478,7 @@ impl Workspace {
         }
         let target = {
             let instrument = data.inner.instrument(&id).expect("just added");
-            let mut target = Target::new(instrument.device.address, kind)
+            let mut target = Target::from_device(&instrument.device, kind)
                 .with_timeout(std::time::Duration::from_secs_f64(timeout.max(0.0)));
             if let Some(port) = port {
                 target = target.with_port(port);

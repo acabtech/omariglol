@@ -211,6 +211,7 @@ mod tests {
             address: addr.ip(),
             transport: Transport::Raw,
             port: Some(addr.port()),
+            usb: None,
             device_name: "inst0".to_string(),
             timeout: Duration::from_secs(2),
         };

@@ -16,8 +16,8 @@ use pyo3::exceptions::{PyException, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyModule};
 
-use omariglol_core::device::{Target, Transport};
-use omariglol_core::transport::{Session, parse_address};
+use omariglol_core::device::{Device, Target, Transport};
+use omariglol_core::transport::Session;
 
 use crate::context;
 use crate::{ScriptError, ScriptEvent};
@@ -138,19 +138,20 @@ fn connect(
         None => defaults.transport,
         Some("vxi11") => Transport::Vxi11,
         Some("raw") => Transport::Raw,
+        Some("usb") => Transport::Usb,
         Some(other) => {
             return Err(PyValueError::new_err(format!(
-                "unknown transport '{other}' (expected 'vxi11' or 'raw')"
+                "unknown transport '{other}' (expected 'vxi11', 'raw' or 'usb')"
             )));
         }
     };
 
-    let ip = parse_address(address).map_err(to_pyerr)?;
+    let device = Device::from_address(address, kind).map_err(to_pyerr)?;
     let timeout = timeout
         .map(|seconds| Duration::from_secs_f64(seconds.max(0.0)))
         .unwrap_or(defaults.timeout);
 
-    let mut target = Target::new(ip, kind).with_timeout(timeout);
+    let mut target = Target::from_device(&device, kind).with_timeout(timeout);
     if let Some(port) = port {
         target = target.with_port(port);
     }

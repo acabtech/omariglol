@@ -18,7 +18,7 @@ use clap::{Args, Parser, Subcommand};
 
 use omariglol_core::autoscale;
 use omariglol_core::benchmark::{self, BenchmarkOptions, BenchmarkReport};
-use omariglol_core::device::{Target, Transport};
+use omariglol_core::device::{Device, Target, Transport};
 use omariglol_core::discovery_engine::{
     CachedInstrument, DiscoveryEngine, DiscoveryEvent, DiscoveryOptions,
 };
@@ -96,6 +96,9 @@ pub enum Command {
 
     /// Autoscale every instrument in a workspace that supports it.
     Autoscale(AutoscaleArgs),
+
+    /// List and inspect instruments attached over USB.
+    Usb(UsbArgs),
 }
 
 #[derive(Debug, Args)]
@@ -156,6 +159,10 @@ pub struct DriverArgs {
     /// Use the raw TCP socket instead of VXI-11.
     #[arg(long)]
     pub raw: bool,
+
+    /// Talk to a USB (USBTMC) instrument; the address is `usb:VVVV:PPPP[:SERIAL]`.
+    #[arg(long, conflicts_with = "raw")]
+    pub usb: bool,
 
     /// Override the port.
     #[arg(long, value_name = "PORT")]
@@ -236,6 +243,10 @@ pub struct ScpiArgs {
     #[arg(long)]
     pub raw: bool,
 
+    /// Talk to a USB (USBTMC) instrument; the address is `usb:VVVV:PPPP[:SERIAL]`.
+    #[arg(long, conflicts_with = "raw")]
+    pub usb: bool,
+
     /// Override the port.
     #[arg(long, value_name = "PORT")]
     pub port: Option<u16>,
@@ -267,6 +278,10 @@ pub struct ScreenshotArgs {
     #[arg(long)]
     pub vxi11: bool,
 
+    /// Capture from a USB (USBTMC) instrument.
+    #[arg(long, conflicts_with_all = ["raw", "vxi11"])]
+    pub usb: bool,
+
     /// Override the port (e.g. 5555 for Rigol's raw SCPI socket).
     #[arg(long, value_name = "PORT")]
     pub port: Option<u16>,
@@ -297,6 +312,10 @@ pub struct BenchmarkArgs {
     /// Use the raw TCP socket instead of VXI-11.
     #[arg(long)]
     pub raw: bool,
+
+    /// Talk to a USB (USBTMC) instrument; the address is `usb:VVVV:PPPP[:SERIAL]`.
+    #[arg(long, conflicts_with = "raw")]
+    pub usb: bool,
 
     /// Override the port (e.g. 5555 for Rigol's raw SCPI socket).
     #[arg(long, value_name = "PORT")]
@@ -331,7 +350,24 @@ fn main() -> anyhow::Result<()> {
         Command::Workspace(args) => cmd_workspace(args),
         Command::Measure(args) => cmd_measure(args),
         Command::Autoscale(args) => cmd_autoscale(args),
+        Command::Usb(args) => cmd_usb(args),
     }
+}
+
+#[derive(Debug, Args)]
+pub struct UsbArgs {
+    #[command(subcommand)]
+    pub command: UsbCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum UsbCommand {
+    /// List USB instruments and whether each exposes a USBTMC interface.
+    List {
+        /// Emit JSON instead of a table.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -535,7 +571,12 @@ fn print_table(headers: &[&str], rows: &[Vec<String>]) {
 // ---------------------------------------------------------------------------
 
 fn cmd_scpi(args: ScpiArgs) -> anyhow::Result<()> {
-    let mut session = open_session(&args.address, args.raw, args.port, args.timeout)?;
+    let mut session = open_session(
+        &args.address,
+        select_transport(args.raw, args.usb),
+        args.port,
+        args.timeout,
+    )?;
     vlog!(1, "connected: {}", session.description());
 
     if args.commands.is_empty() {
@@ -548,28 +589,35 @@ fn cmd_scpi(args: ScpiArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Open a session for an address, applying the transport, port and timeout.
-fn open_session(
-    address: &str,
-    raw: bool,
-    port: Option<u16>,
-    timeout_secs: u64,
-) -> anyhow::Result<Session> {
-    let ip = parse_address(address)?;
-    let transport = if raw {
+/// Pick the transport for a command that defaults to VXI-11.
+fn select_transport(raw: bool, usb: bool) -> Transport {
+    if usb {
+        Transport::Usb
+    } else if raw {
         Transport::Raw
     } else {
         Transport::Vxi11
-    };
-    let mut target = Target::new(ip, transport).with_timeout(Duration::from_secs(timeout_secs));
+    }
+}
+
+/// Open a session for an address, applying the transport, port and timeout.
+fn open_session(
+    address: &str,
+    transport_kind: Transport,
+    port: Option<u16>,
+    timeout_secs: u64,
+) -> anyhow::Result<Session> {
+    let device = Device::from_address(address, transport_kind)?;
+    let mut target = Target::from_device(&device, transport_kind)
+        .with_timeout(Duration::from_secs(timeout_secs));
     if let Some(port) = port {
         target = target.with_port(port);
     }
     vlog!(
         1,
-        "opening {} to {}:{}",
-        transport,
-        target.address,
+        "opening {} to {} (port {})",
+        transport_kind,
+        device.label(),
         target.effective_port()
     );
     Ok(Session::open(target)?)
@@ -633,30 +681,38 @@ fn interactive(session: &mut Session, hex: bool) -> anyhow::Result<()> {
 // ---------------------------------------------------------------------------
 
 fn cmd_screenshot(args: ScreenshotArgs) -> anyhow::Result<()> {
-    let ip = parse_address(&args.address)?;
     let timeout = Duration::from_secs(args.timeout);
 
-    // Raw TCP is the default image-acquisition protocol: it streams the image
-    // at TCP speed, whereas VXI-11 caps each read at the instrument's
-    // `maxRecvSize` (often a single Ethernet MTU), which makes large captures
-    // crawl. `--raw` is accepted for explicitness; `--vxi11` opts back in.
-    let transport_kind = match (args.raw, args.vxi11) {
-        (_, true) => Transport::Vxi11,
-        _ => Transport::Raw,
-    };
-
-    let mut transport = if transport_kind == Transport::Vxi11 {
-        let target = Target::new(ip, Transport::Vxi11).with_timeout(timeout);
-        transport::open(&target)?
-    } else if let Some(port) = args.port {
-        let target = Target::new(ip, Transport::Raw)
-            .with_port(port)
-            .with_timeout(timeout);
+    let mut transport = if args.usb {
+        // USBTMC carries the same IEEE-488.2 block as the network transports.
+        let device = Device::from_address(&args.address, Transport::Usb)?;
+        let target = Target::from_device(&device, Transport::Usb).with_timeout(timeout);
         transport::open(&target)?
     } else {
-        // No port given: probe the known vendor raw ports (Rigol 5555, the
-        // LXI-standard 5025) and use the first that answers.
-        screenshot::open_default_transport(ip, timeout)?
+        let ip = parse_address(&args.address)?;
+        // Raw TCP is the default image-acquisition protocol: it streams the
+        // image at TCP speed, whereas VXI-11 caps each read at the instrument's
+        // `maxRecvSize` (often a single Ethernet MTU), which makes large
+        // captures crawl. `--raw` is accepted for explicitness; `--vxi11` opts
+        // back in.
+        let transport_kind = match (args.raw, args.vxi11) {
+            (_, true) => Transport::Vxi11,
+            _ => Transport::Raw,
+        };
+
+        if transport_kind == Transport::Vxi11 {
+            let target = Target::new(ip, Transport::Vxi11).with_timeout(timeout);
+            transport::open(&target)?
+        } else if let Some(port) = args.port {
+            let target = Target::new(ip, Transport::Raw)
+                .with_port(port)
+                .with_timeout(timeout);
+            transport::open(&target)?
+        } else {
+            // No port given: probe the known vendor raw ports (Rigol 5555, the
+            // LXI-standard 5025) and use the first that answers.
+            screenshot::open_default_transport(ip, timeout)?
+        }
     };
     vlog!(1, "connected: {}", transport.description());
 
@@ -682,13 +738,10 @@ fn cmd_screenshot(args: ScreenshotArgs) -> anyhow::Result<()> {
 // ---------------------------------------------------------------------------
 
 fn cmd_benchmark(args: BenchmarkArgs) -> anyhow::Result<()> {
-    let ip = parse_address(&args.address)?;
-    let transport_kind = if args.raw {
-        Transport::Raw
-    } else {
-        Transport::Vxi11
-    };
-    let mut target = Target::new(ip, transport_kind).with_timeout(Duration::from_secs(3));
+    let transport_kind = select_transport(args.raw, args.usb);
+    let device = Device::from_address(&args.address, transport_kind)?;
+    let mut target =
+        Target::from_device(&device, transport_kind).with_timeout(Duration::from_secs(3));
     if let Some(port) = args.port {
         target = target.with_port(port);
     }
@@ -751,6 +804,44 @@ fn print_benchmark_table(report: &BenchmarkReport) {
 }
 
 // ---------------------------------------------------------------------------
+// usb
+// ---------------------------------------------------------------------------
+
+/// List USB instruments and whether each exposes a USBTMC interface.
+fn cmd_usb(args: UsbArgs) -> anyhow::Result<()> {
+    match args.command {
+        UsbCommand::List { json } => {
+            let devices = omariglol_core::usb::enumerate();
+            if json {
+                println!("{}", serde_json::to_string_pretty(&devices)?);
+            } else if devices.is_empty() {
+                println!(
+                    "no USB devices found (rebuild with the `usb` feature to enumerate)"
+                );
+            } else {
+                println!(
+                    "{:<10} {:<4} {:<5} {:<6} {:<8} {}",
+                    "ID", "BUS", "ADDR", "IFACE", "DRIVER", "LABEL"
+                );
+                for device in devices {
+                    println!(
+                        "{:04x}:{:04x}  {:>3}  {:>4}  {:>5}  {:<8} {}",
+                        device.id.vendor,
+                        device.id.product,
+                        device.bus,
+                        device.address,
+                        device.interface_number,
+                        if device.is_usbtmc { "usbtmc" } else { "-" },
+                        device.label(),
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // run
 // ---------------------------------------------------------------------------
 
@@ -799,7 +890,12 @@ fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
 // ---------------------------------------------------------------------------
 
 fn cmd_driver(args: DriverArgs) -> anyhow::Result<()> {
-    let mut session = open_session(&args.address, args.raw, args.port, args.timeout)?;
+    let mut session = open_session(
+        &args.address,
+        select_transport(args.raw, args.usb),
+        args.port,
+        args.timeout,
+    )?;
     let idn = session.identify()?;
     let driver = InstrumentDriver::from_idn(&idn);
 

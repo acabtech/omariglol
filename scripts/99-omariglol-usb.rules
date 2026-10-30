@@ -1,0 +1,19 @@
+# USB permissions for omariglol.
+#
+# libusb needs read/write access to the raw USB device node to drive USBTMC.
+# By default these nodes are owned by root, so an unprivileged `riglol --usb`
+# fails with "Access denied".
+#
+# We grant access two ways so this works on Omarchy/Arch (no `plugdev` group)
+# and on Debian-style systems:
+#   - TAG+="uaccess" lets systemd-logind grant the active seat user an ACL
+#   - GROUP="uucp" covers the conventional USB/serial group
+#
+# Install with: sudo scripts/install-usb-udev.sh
+# Then unplug/replug the instrument (or run: sudo udevadm trigger).
+
+# Rigol DS1000Z / MSO1000Z series (vendor 0x1AB1, product 0x04CE).
+SUBSYSTEM=="usb", ATTR{idVendor}=="1ab1", ATTR{idProduct}=="04ce", MODE="0660", GROUP="uucp", TAG+="uaccess"
+
+# Generic USBTMC instruments: interface class 0xFE, subclass 0x03.
+SUBSYSTEM=="usb", ENV{ID_USB_INTERFACES}=="*:fe03:*", MODE="0660", GROUP="uucp", TAG+="uaccess"

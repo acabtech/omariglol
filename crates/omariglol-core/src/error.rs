@@ -42,6 +42,12 @@ pub enum Error {
     #[error("operation not supported: {0}")]
     Unsupported(String),
 
+    #[error("USB error: {0}")]
+    Usb(String),
+
+    #[error("USBTMC protocol error: {0}")]
+    UsbTmc(String),
+
     #[error("{0}")]
     Other(String),
 }
@@ -63,6 +69,11 @@ impl Error {
                 err.kind(),
                 io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
             ),
+            // libusb reports a bulk/control timeout as a plain error string, so
+            // classify it by message. The USB layer always spells it "timeout".
+            Error::Usb(msg) | Error::UsbTmc(msg) => {
+                msg.to_ascii_lowercase().contains("timeout")
+            }
             _ => false,
         }
     }

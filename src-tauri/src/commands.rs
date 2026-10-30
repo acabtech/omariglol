@@ -44,7 +44,6 @@ use omariglol_core::preset::Preset;
 use omariglol_core::rule::Rule;
 use omariglol_core::screenshot::{self, ImageFormat, Screenshot};
 use omariglol_core::timeline::{TimelineEvent, TimelineEventKind};
-use omariglol_core::transport;
 use omariglol_core::trigger::Trigger;
 use omariglol_core::workspace::{now_millis, Workspace, WorkspaceId, WorkspaceManager};
 use omariglol_script::{ScriptEngine, ScriptOptions};
@@ -124,6 +123,8 @@ impl From<Error> for CommandError {
                 Error::Malformed(_) => "malformed",
                 Error::ScreenshotUnsupported(_) => "screenshot-unsupported",
                 Error::Unsupported(_) => "unsupported",
+                Error::Usb(_) => "usb",
+                Error::UsbTmc(_) => "usbtmc",
                 Error::Other(_) => "other",
             }
         };
@@ -256,7 +257,7 @@ impl Default for WorkspaceState {
 
 /// Build a transport target from an instrument's configuration.
 fn target_for(instrument: &Instrument) -> Target {
-    let mut target = Target::new(instrument.device.address, instrument.config.transport)
+    let mut target = Target::from_device(&instrument.device, instrument.config.transport)
         .with_timeout(instrument.config.timeout());
     if let Some(port) = instrument.config.port {
         target = target.with_port(port);
@@ -698,11 +699,11 @@ pub async fn workspace_add_instrument(
     request: AddInstrumentRequest,
 ) -> CommandResult<InstrumentView> {
     let state = state.inner().clone();
-    let address = transport::parse_address(&request.address)?;
-    let mut device = Device::manual(address);
+    let mut device = Device::from_address(&request.address, request.transport)?;
     match request.transport {
         Transport::Vxi11 => device.vxi11_port = request.port,
         Transport::Raw => device.raw_port = request.port,
+        Transport::Usb => {}
     }
 
     state.ensure_workspace();
@@ -1614,8 +1615,8 @@ pub async fn cancel_script(state: State<'_, WorkspaceState>) -> CommandResult<()
 /// Build a target from a connect request. Kept separate so the conversion is
 /// testable independently of the IPC layer.
 pub fn target_from_request(request: &ConnectRequest) -> omariglol_core::Result<Target> {
-    let address = transport::parse_address(&request.address)?;
-    let mut target = Target::new(address, request.transport)
+    let device = Device::from_address(&request.address, request.transport)?;
+    let mut target = Target::from_device(&device, request.transport)
         .with_timeout(Duration::from_secs(request.timeout_secs));
     if let Some(port) = request.port {
         target = target.with_port(port);

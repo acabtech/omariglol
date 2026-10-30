@@ -12,6 +12,12 @@ repository.workspace = true
 name = "riglol"
 path = "src/main.rs"
 
+[features]
+default = ["usb"]
+# USB (USBTMC) support, forwarded to the core. Disable with
+# `--no-default-features` on machines without libusb-1.0.
+usb = ["omariglol-core/usb"]
+
 [dependencies]
 omariglol-core = { workspace = true }
 omariglol-script = { workspace = true }

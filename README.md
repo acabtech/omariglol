@@ -66,9 +66,10 @@ The CLI mirrors `lxi-tools`, with Python in place of Lua:
 | Command | Status | Notes |
 | --- | --- | --- |
 | `riglol discover` | implemented | VXI-11 broadcast, mDNS/DNS-SD, subnet scan, TTL cache, `--json`, `--add` |
-| `riglol scpi` | implemented | VXI-11 or `--raw`, hex output, interactive mode |
-| `riglol screenshot` | implemented | IEEE-488.2 block capture, per-vendor profiles, `--command` override |
-| `riglol benchmark` | implemented | SCPI round-trip statistics, `--json` |
+| `riglol scpi` | implemented | VXI-11, `--raw` or `--usb` (USBTMC), hex output, interactive mode |
+| `riglol screenshot` | implemented | IEEE-488.2 block capture, per-vendor profiles, `--command` override, `--usb` |
+| `riglol benchmark` | implemented | SCPI round-trip statistics, `--json`, `--usb` |
+| `riglol usb list` | implemented | Enumerate USB instruments and their USBTMC interface status |
 | `riglol run` | implemented | Execute a Python measurement script |
 | `riglol driver` | implemented | Show the named command surface for an instrument |
 | `riglol workspace` | implemented | List, create and inspect saved workspaces |
@@ -105,6 +106,19 @@ See [`docs/omarchy-integration.md`](docs/omarchy-integration.md).
 ## Building
 
 Requires Rust (stable), Node.js 20+, and the usual Tauri Linux dependencies.
+The USB transport also needs the **libusb-1.0** development package
+(`libusb-1.0-0-dev` on Debian/Ubuntu, `libusb` on Arch). It is behind the `usb`
+cargo feature, which the CLI and app enable by default; build the core with
+`--no-default-features` to skip it.
+
+On Linux, libusb cannot open a USBTMC instrument without permission. Install the
+bundled udev rule once:
+
+```bash
+sudo scripts/install-usb-udev.sh
+```
+
+Then replug the instrument (or run `sudo udevadm trigger`).
 
 ```bash
 # Protocol core + CLI

@@ -63,11 +63,15 @@ pub mod screenshot;
 pub mod timeline;
 pub mod transport;
 pub mod trigger;
+pub mod usb;
 pub mod workspace;
 
-pub use device::{Device, DiscoveryMethod, Target, Transport};
+pub use device::{Device, DiscoveryMethod, Target, Transport, UsbSelector};
 pub use error::{Error, Result};
 pub use transport::{ScpiTransport, Session};
+
+// USB subsystem.
+pub use usb::{UsbDeviceInfo, UsbId};
 
 // Multi-instrument platform entities (concepts.md §4).
 pub use autoscale::{AutoscaleReport, AutoscaleResult, autoscale_workspace};

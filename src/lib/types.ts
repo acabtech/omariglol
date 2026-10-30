@@ -14,7 +14,7 @@ export type DiscoveryMethod =
   | "manual";
 
 /** Which transport to use. Mirrors `Transport` in Rust. */
-export type Transport = "vxi11" | "raw";
+export type Transport = "vxi11" | "raw" | "usb";
 
 /** The connection lifecycle state of an instrument. */
 export type InstrumentState =

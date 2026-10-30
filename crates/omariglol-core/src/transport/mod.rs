@@ -39,6 +39,38 @@ pub trait ScpiTransport: Send + Sync {
         Ok(())
     }
 
+    /// Read the instrument status byte — the transport-level equivalent of the
+    /// VXI-11 `device_readstb` or the USBTMC `READ_STATUS_BYTE` request.
+    ///
+    /// The default reports the capability as unsupported, so a transport that
+    /// only speaks bare SCPI still satisfies the trait.
+    fn read_status_byte(&mut self) -> Result<u8> {
+        Err(Error::Unsupported(
+            "status byte is not supported by this transport".to_string(),
+        ))
+    }
+
+    /// Clear the instrument's input/output buffers.
+    fn device_clear(&mut self) -> Result<()> {
+        Err(Error::Unsupported(
+            "device clear is not supported by this transport".to_string(),
+        ))
+    }
+
+    /// Fire the instrument's hardware trigger.
+    fn device_trigger(&mut self) -> Result<()> {
+        Err(Error::Unsupported(
+            "device trigger is not supported by this transport".to_string(),
+        ))
+    }
+
+    /// Toggle front-panel lockout (remote/local).
+    fn set_remote(&mut self, _remote: bool) -> Result<()> {
+        Err(Error::Unsupported(
+            "remote/local is not supported by this transport".to_string(),
+        ))
+    }
+
     /// Human-readable description of the underlying channel.
     fn description(&self) -> String;
 }
@@ -48,6 +80,9 @@ pub fn open(target: &Target) -> Result<Box<dyn ScpiTransport>> {
     match target.transport {
         Transport::Vxi11 => Ok(Box::new(vxi11::Vxi11Transport::connect(target)?)),
         Transport::Raw => Ok(Box::new(raw::RawTransport::connect(target)?)),
+        Transport::Usb => Ok(Box::new(crate::usb::usbtmc::UsbTmcTransport::connect(
+            target,
+        )?)),
     }
 }
 

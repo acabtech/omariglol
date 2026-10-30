@@ -8,6 +8,11 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 
+[features]
+default = []
+# Forward USB (USBTMC) support to the core so scripts can use transport="usb".
+usb = ["omariglol-core/usb"]
+
 [dependencies]
 omariglol-core = { workspace = true }
 serde = { workspace = true }

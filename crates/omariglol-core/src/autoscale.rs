@@ -80,7 +80,7 @@ impl AutoscaleReport {
 
 /// Build a transport target from an instrument's configuration.
 fn target_for(instrument: &Instrument) -> Target {
-    let mut target = Target::new(instrument.device.address, instrument.config.transport)
+    let mut target = Target::from_device(&instrument.device, instrument.config.transport)
         .with_timeout(instrument.config.timeout());
     if let Some(port) = instrument.config.port {
         target = target.with_port(port);

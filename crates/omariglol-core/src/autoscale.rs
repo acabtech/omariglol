@@ -100,7 +100,7 @@ fn autoscale_one(instrument: &Instrument) -> AutoscaleResult {
     let mut result = AutoscaleResult {
         instrument_id: instrument.id.to_string(),
         label: instrument.label(),
-        address: instrument.device.address.to_string(),
+        address: instrument.device.display_address(),
         instrument_type: instrument
             .instrument_type()
             .unwrap_or(InstrumentType::Unknown),

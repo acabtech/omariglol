@@ -24,6 +24,9 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 pub enum DiscoveryMethod {
     /// VXI-11 broadcast against the portmapper (what `lxi discover` does).
     Vxi11Broadcast,
+    /// A direct portmapper query, used when broadcast and raw SCPI are
+    /// unavailable but the instrument still answers `DEVICE_CORE`.
+    Vxi11Portmap,
     /// mDNS / DNS-SD service browsing (`lxi discover --mdns`).
     Mdns,
     /// A direct SCPI `*IDN?` probe over TCP on a known or scanned address.
@@ -38,6 +41,7 @@ impl fmt::Display for DiscoveryMethod {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let name = match self {
             DiscoveryMethod::Vxi11Broadcast => "vxi11-broadcast",
+            DiscoveryMethod::Vxi11Portmap => "vxi11-portmap",
             DiscoveryMethod::Mdns => "mdns",
             DiscoveryMethod::ScpiTcp => "scpi-tcp",
             DiscoveryMethod::Manual => "manual",

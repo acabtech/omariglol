@@ -344,16 +344,51 @@ fn standard_commands() -> Vec<DriverCommand> {
     ]
 }
 
+/// A rich, family-specific command set selected by `*IDN?` prefix.
+///
+/// This is the extension point for new instruments: a supported family is one
+/// entry in [`DRIVER_PROFILES`] plus a `fn() -> Vec<DriverCommand>` builder. The
+/// generic, type-based path is never changed when a family is added.
+pub struct DriverProfile {
+    /// Friendly family name, e.g. `"Rigol DS1000Z"`.
+    pub name: &'static str,
+    /// Upper-cased `*IDN?` prefixes that select this profile.
+    pub idn_prefixes: &'static [&'static str],
+    /// Builds the family's command surface.
+    pub build: fn() -> Vec<DriverCommand>,
+}
+
+/// Registered rich profiles, checked in order.
+///
+/// ## Adding a future scope
+///
+/// 1. Write a `fn <family>_commands() -> Vec<DriverCommand>` next to
+///    [`ds1000z_commands`], starting from [`standard_commands`].
+/// 2. Add a [`DriverProfile`] entry below with the family's `*IDN?` prefixes.
+///
+/// No other code needs to change: discovery, `riglol driver`, measurement and
+/// the scripting API all read the resulting command table.
+pub static DRIVER_PROFILES: &[DriverProfile] = &[DriverProfile {
+    name: "Rigol DS1000Z",
+    idn_prefixes: DS1000Z_PREFIXES,
+    build: ds1000z_commands,
+}];
+
+/// The rich profile matching an `*IDN?` string, if any.
+pub fn driver_profile_for_idn(idn: &str) -> Option<&'static DriverProfile> {
+    let upper = idn.trim().to_ascii_uppercase();
+    DRIVER_PROFILES
+        .iter()
+        .find(|profile| profile.idn_prefixes.iter().any(|p| upper.starts_with(p)))
+}
+
 /// A rich, family-specific command set, selected by `*IDN?` prefix.
 ///
 /// Returns the profile name and its commands, or `None` when no rich profile
 /// matches (in which case the generic set applies).
 fn vendor_commands(idn: &str) -> Option<(&'static str, Vec<DriverCommand>)> {
-    let upper = idn.trim().to_ascii_uppercase();
-    if DS1000Z_PREFIXES.iter().any(|p| upper.starts_with(p)) {
-        return Some(("Rigol DS1000Z", ds1000z_commands()));
-    }
-    None
+    let profile = driver_profile_for_idn(idn)?;
+    Some((profile.name, (profile.build)()))
 }
 
 /// `*IDN?` prefixes that select the Rigol DS1000Z rich profile.
@@ -620,6 +655,18 @@ mod tests {
         assert!(driver.command("measure_frequency").is_some());
         assert!(driver.command("identify").is_some());
         assert!(driver.command("nope").is_none());
+    }
+
+    #[test]
+    fn test_driver_profile_registry_is_well_formed() {
+        assert!(!DRIVER_PROFILES.is_empty());
+        for profile in DRIVER_PROFILES {
+            assert!(!profile.name.is_empty());
+            assert!(!profile.idn_prefixes.is_empty());
+            assert!(!(profile.build)().is_empty());
+        }
+        assert!(driver_profile_for_idn("RIGOL TECHNOLOGIES,DS1054Z,SN,1.0").is_some());
+        assert!(driver_profile_for_idn("KEYSIGHT TECHNOLOGIES,DSOX,SN,1.0").is_none());
     }
 
     #[test]

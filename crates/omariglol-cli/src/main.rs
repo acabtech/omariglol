@@ -125,6 +125,10 @@ pub struct DiscoverArgs {
     #[arg(long)]
     pub no_scan: bool,
 
+    /// Skip USB (USBTMC) enumeration.
+    #[arg(long)]
+    pub no_usb: bool,
+
     /// Additional hosts to probe, repeatable (e.g. --host 192.168.1.50).
     #[arg(long = "host", value_name = "ADDRESS")]
     pub hosts: Vec<String>,
@@ -412,6 +416,7 @@ fn cmd_discover_scan(args: DiscoverArgs) -> anyhow::Result<()> {
         ttl_secs: args.ttl,
         incremental: !args.no_incremental,
         listen_timeout: Duration::from_secs(args.timeout),
+        use_usb: !args.no_usb,
         ..Default::default()
     };
 
@@ -420,7 +425,11 @@ fn cmd_discover_scan(args: DiscoverArgs) -> anyhow::Result<()> {
         if verbosity() >= 1
             && let DiscoveryEvent::InstrumentFound { instrument } = event
         {
-            eprintln!("  found {} at {}", instrument.model, instrument.address());
+            eprintln!(
+                "  found {} at {}",
+                dash_if_empty(&instrument.model),
+                instrument.display_address()
+            );
         }
     });
 
@@ -512,7 +521,7 @@ fn print_cached_table(instruments: &[CachedInstrument]) {
         .iter()
         .map(|instrument| {
             vec![
-                instrument.address().to_string(),
+                instrument.display_address(),
                 dash_if_empty(&instrument.model),
                 dash_if_empty(&instrument.serial),
                 instrument
@@ -683,44 +692,57 @@ fn interactive(session: &mut Session, hex: bool) -> anyhow::Result<()> {
 fn cmd_screenshot(args: ScreenshotArgs) -> anyhow::Result<()> {
     let timeout = Duration::from_secs(args.timeout);
 
-    let mut transport = if args.usb {
+    if args.usb {
         // USBTMC carries the same IEEE-488.2 block as the network transports.
         let device = Device::from_address(&args.address, Transport::Usb)?;
         let target = Target::from_device(&device, Transport::Usb).with_timeout(timeout);
-        transport::open(&target)?
-    } else {
-        let ip = parse_address(&args.address)?;
-        // Raw TCP is the default image-acquisition protocol: it streams the
-        // image at TCP speed, whereas VXI-11 caps each read at the instrument's
-        // `maxRecvSize` (often a single Ethernet MTU), which makes large
-        // captures crawl. `--raw` is accepted for explicitness; `--vxi11` opts
-        // back in.
+        let mut transport = transport::open(&target)?;
+        return finish_screenshot(transport.as_mut(), &args);
+    }
+
+    let ip = parse_address(&args.address)?;
+    // An explicit transport or port is honoured exactly as requested.
+    if args.raw || args.vxi11 || args.port.is_some() {
         let transport_kind = match (args.raw, args.vxi11) {
             (_, true) => Transport::Vxi11,
             _ => Transport::Raw,
         };
-
-        if transport_kind == Transport::Vxi11 {
-            let target = Target::new(ip, Transport::Vxi11).with_timeout(timeout);
-            transport::open(&target)?
-        } else if let Some(port) = args.port {
-            let target = Target::new(ip, Transport::Raw)
-                .with_port(port)
-                .with_timeout(timeout);
-            transport::open(&target)?
-        } else {
-            // No port given: probe the known vendor raw ports (Rigol 5555, the
-            // LXI-standard 5025) and use the first that answers.
-            screenshot::open_default_transport(ip, timeout)?
+        let mut target = Target::new(ip, transport_kind).with_timeout(timeout);
+        if let Some(port) = args.port {
+            target = target.with_port(port);
         }
-    };
+        let mut transport = transport::open(&target)?;
+        return finish_screenshot(transport.as_mut(), &args);
+    }
+
+    // No explicit transport: use raw TCP first, because it streams the image at
+    // TCP speed. Some instruments disable raw SCPI (or reserve it for another
+    // interface) while VXI-11 still works, so fall back rather than fail.
+    match screenshot::open_default_transport(ip, timeout) {
+        Ok(mut transport) => match finish_screenshot(transport.as_mut(), &args) {
+            Ok(()) => return Ok(()),
+            Err(err) => vlog!(1, "raw screenshot failed ({err}); retrying over VXI-11"),
+        },
+        Err(err) => vlog!(1, "raw screenshot unavailable ({err}); retrying over VXI-11"),
+    }
+
+    let target = Target::new(ip, Transport::Vxi11).with_timeout(timeout);
+    let mut transport = transport::open(&target)?;
+    finish_screenshot(transport.as_mut(), &args)
+}
+
+/// Query the identity, capture the screen, and write it to `args.file`.
+fn finish_screenshot(
+    transport: &mut dyn transport::ScpiTransport,
+    args: &ScreenshotArgs,
+) -> anyhow::Result<()> {
     vlog!(1, "connected: {}", transport.description());
 
     let idn_bytes = transport.query("*IDN?")?;
     let idn = String::from_utf8_lossy(&idn_bytes).trim().to_string();
     vlog!(1, "instrument: {idn}");
 
-    let shot = screenshot::capture(transport.as_mut(), &idn, args.command.as_deref())?;
+    let shot = screenshot::capture(transport, &idn, args.command.as_deref())?;
     std::fs::write(&args.file, &shot.data)?;
 
     println!(
@@ -1055,14 +1077,18 @@ fn capture_workspace_snapshots(workspace: &Workspace, dir: &Path) {
         let label = safe_component(&instrument.label());
         let timeout = instrument.config.timeout();
 
-        let mut transport =
-            match screenshot::open_default_transport(instrument.device.address, timeout) {
-                Ok(transport) => transport,
-                Err(err) => {
-                    eprintln!("snapshot: {}: {err}", instrument.label());
-                    continue;
-                }
-            };
+        let mut transport = match screenshot::open_transport_for_device(
+            &instrument.device,
+            instrument.config.transport,
+            instrument.config.port,
+            timeout,
+        ) {
+            Ok(transport) => transport,
+            Err(err) => {
+                eprintln!("snapshot: {}: {err}", instrument.label());
+                continue;
+            }
+        };
 
         let idn = match transport.query("*IDN?") {
             Ok(raw) => String::from_utf8_lossy(&raw).trim().to_string(),
@@ -1079,8 +1105,13 @@ fn capture_workspace_snapshots(workspace: &Workspace, dir: &Path) {
         // the socket, which would otherwise be mistaken for the image block.
         drop(transport);
 
-        let shot = match screenshot::capture_from_address(instrument.device.address, timeout, None)
-        {
+        let shot = match screenshot::capture_from_device(
+            &instrument.device,
+            instrument.config.transport,
+            instrument.config.port,
+            timeout,
+            None,
+        ) {
             Ok(shot) => shot,
             Err(err) => {
                 eprintln!("snapshot: {}: {err}", instrument.label());

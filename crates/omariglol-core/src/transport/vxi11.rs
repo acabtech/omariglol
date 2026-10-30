@@ -333,13 +333,12 @@ impl ScpiTransport for Vxi11Transport {
         // payload, so the caller sees the whole response.
         let mut data = Vec::new();
         loop {
-            let params = encode_device_read(
-                self.lid,
-                self.read_size,
-                timeout_ms(self.timeout),
-                FLAG_TERMCHRSET,
-                TERMINATOR as i32,
-            );
+            // No termination character: END is the authoritative
+            // message-complete signal. Setting a termchar makes some
+            // instruments (the Rigol DS1000Z included) stop at the newline and
+            // report CHR without END, which forces a second, blocking read and
+            // adds hundreds of milliseconds to every query.
+            let params = encode_device_read(self.lid, self.read_size, timeout_ms(self.timeout), 0, 0);
             let reply =
                 self.rpc
                     .call(DEVICE_CORE, DEVICE_CORE_VERSION, PROC_DEVICE_READ, &params)?;

@@ -545,7 +545,7 @@ pub async fn discovery_scan(
                     };
                     (
                         TimelineEventKind::Marker,
-                        format!("found {label} at {}", instrument.address()),
+                        format!("found {label} at {}", instrument.display_address()),
                     )
                 }
                 // Progress is too noisy for the timeline; it is emitted as an

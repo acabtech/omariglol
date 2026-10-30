@@ -886,7 +886,7 @@ fn cached_to_dict<'py>(
     instrument: &CachedInstrument,
 ) -> PyResult<Bound<'py, PyDict>> {
     let dict = PyDict::new(py);
-    dict.set_item("address", instrument.address().to_string())?;
+    dict.set_item("address", instrument.display_address())?;
     dict.set_item("idn", &instrument.idn)?;
     dict.set_item("vendor", &instrument.vendor)?;
     dict.set_item("model", &instrument.model)?;

@@ -27,7 +27,14 @@ pub struct InstrumentId(pub String);
 
 impl InstrumentId {
     /// Build an id from a device, preferring a stable address+transport key.
+    ///
+    /// A USB instrument is keyed by its selector rather than its (unspecified)
+    /// IP address, so two devices attached at once cannot collapse onto the same
+    /// `0.0.0.0` id.
     pub fn from_device(device: &Device, transport: Transport) -> Self {
+        if let Some(selector) = &device.usb {
+            return InstrumentId(selector.to_string());
+        }
         InstrumentId(format!("{}:{}", transport, device.address))
     }
 
@@ -247,6 +254,17 @@ mod tests {
         let id = InstrumentId::from_device(&device("192.168.1.50"), Transport::Vxi11);
         assert_eq!(id.as_str(), "vxi11:192.168.1.50");
         assert_eq!(id.to_string(), "vxi11:192.168.1.50");
+    }
+
+    #[test]
+    fn test_instrument_id_usb_is_selector_not_unspecified_ip() {
+        let a = Device::usb(crate::device::UsbSelector::new(0x1AB1, 0x04CE).with_serial("A"));
+        let b = Device::usb(crate::device::UsbSelector::new(0x1AB1, 0x04CE).with_serial("B"));
+        let id_a = InstrumentId::from_device(&a, Transport::Usb);
+        let id_b = InstrumentId::from_device(&b, Transport::Usb);
+        assert_eq!(id_a.as_str(), "usb:0x1AB1:0x04CE:A");
+        assert_ne!(id_a, id_b);
+        assert!(!id_a.as_str().contains("0.0.0.0"));
     }
 
     #[test]

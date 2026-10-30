@@ -365,27 +365,28 @@ pub struct PortMapping {
     pub port: u16,
 }
 
-/// Walk a `pmaplist` result, which is a linked list of `{ pmap, bool next }`.
+/// Walk a `pmaplist` result.
+///
+/// XDR encodes a linked list as a boolean *presence* flag before each element
+/// (`TRUE, map, TRUE, map, …, FALSE`), not as a trailing "more" flag after the
+/// element. Reading it the wrong way round silently misaligns every field.
 fn parse_pmaplist(reader: &mut XdrReader<'_>) -> Result<Vec<PortMapping>> {
     let mut mappings = Vec::new();
     loop {
-        if reader.remaining() == 0 {
+        let present = reader.bool()?;
+        if !present {
             break;
         }
         let prog = reader.u32()?;
         let vers = reader.u32()?;
         let prot = reader.u32()?;
         let port = reader.u32()?;
-        let more = reader.bool()?;
         mappings.push(PortMapping {
             prog,
             vers,
             prot,
             port: port as u16,
         });
-        if !more {
-            break;
-        }
     }
     Ok(mappings)
 }
@@ -727,11 +728,12 @@ mod tests {
         xdr.u32(AUTH_NULL); // verifier flavor
         xdr.u32(0); // verifier length
         xdr.u32(SUCCESS);
+        xdr.bool(true); // one entry follows
         xdr.u32(100_000); // prog
         xdr.u32(2); // vers
         xdr.u32(IPPROTO_TCP); // prot
         xdr.u32(111); // port
-        xdr.bool(false); // no more entries
+        xdr.bool(false); // end of list
         let reply = xdr.into_bytes();
         let result = parse_reply(&reply, Some(1)).unwrap();
         let mut reader = XdrReader::new(&result);
@@ -752,17 +754,19 @@ mod tests {
         xdr.u32(AUTH_NULL);
         xdr.u32(0);
         xdr.u32(SUCCESS);
-        // First entry, more to follow.
+        // Presence flag, then the first entry.
+        xdr.bool(true);
         xdr.u32(100_000);
         xdr.u32(2);
         xdr.u32(IPPROTO_TCP);
         xdr.u32(111);
+        // Presence flag, then the second entry.
         xdr.bool(true);
-        // Second entry, end of list.
         xdr.u32(0x0006_07AF);
         xdr.u32(1);
         xdr.u32(IPPROTO_TCP);
         xdr.u32(1024);
+        // End of list.
         xdr.bool(false);
         let reply = xdr.into_bytes();
         let result = parse_reply(&reply, Some(1)).unwrap();

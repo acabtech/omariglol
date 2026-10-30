@@ -11,7 +11,7 @@ use std::time::Duration;
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
-use crate::device::{Target, Transport};
+use crate::device::{Device, Target, Transport};
 use crate::error::{Error, Result};
 use crate::transport::raw::DEFAULT_RAW_PORT;
 use crate::transport::{self, ScpiTransport};
@@ -287,6 +287,67 @@ pub fn capture_from_address(
     custom_command: Option<&str>,
 ) -> Result<Screenshot> {
     let mut transport = open_default_transport(address, timeout)?;
+    let idn = String::from_utf8_lossy(&transport.query("*IDN?")?)
+        .trim()
+        .to_string();
+    capture(transport.as_mut(), &idn, custom_command)
+}
+
+/// Open a transport for a workspace instrument, honouring USB.
+///
+/// Network instruments keep the fast raw-TCP probing behaviour of
+/// [`open_default_transport`]; a USB instrument is opened over USBTMC using its
+/// selector. Keeping this decision here means every caller (CLI snapshots, the
+/// desktop app and the shell plugin) reaches USB instruments the same way.
+pub fn open_transport_for_device(
+    device: &Device,
+    transport_kind: Transport,
+    port: Option<u16>,
+    timeout: Duration,
+) -> Result<Box<dyn ScpiTransport>> {
+    match transport_kind {
+        // A USB instrument is addressed by its selector, never by IP.
+        Transport::Usb => {
+            let mut target = Target::from_device(device, Transport::Usb).with_timeout(timeout);
+            if let Some(port) = port {
+                target = target.with_port(port);
+            }
+            transport::open(&target)
+        }
+        // VXI-11 is explicit: honour it instead of probing raw TCP, which may
+        // be disabled while the portmapper and VXI-11 server still work.
+        Transport::Vxi11 => {
+            let mut target = Target::from_device(device, Transport::Vxi11).with_timeout(timeout);
+            if let Some(port) = port {
+                target = target.with_port(port);
+            }
+            transport::open(&target)
+        }
+        // Raw is usually discovered by probing the vendor ports; an explicit
+        // port pins the connection to the one that answered.
+        Transport::Raw => {
+            if port.is_some() || device.raw_port.is_some() {
+                let mut target = Target::from_device(device, Transport::Raw).with_timeout(timeout);
+                if let Some(port) = port {
+                    target = target.with_port(port);
+                }
+                transport::open(&target)
+            } else {
+                open_default_transport(device.address, timeout)
+            }
+        }
+    }
+}
+
+/// Capture a screenshot from a workspace instrument, over USB when needed.
+pub fn capture_from_device(
+    device: &Device,
+    transport_kind: Transport,
+    port: Option<u16>,
+    timeout: Duration,
+    custom_command: Option<&str>,
+) -> Result<Screenshot> {
+    let mut transport = open_transport_for_device(device, transport_kind, port, timeout)?;
     let idn = String::from_utf8_lossy(&transport.query("*IDN?")?)
         .trim()
         .to_string();

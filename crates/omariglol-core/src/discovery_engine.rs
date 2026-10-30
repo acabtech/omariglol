@@ -31,7 +31,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use crate::device::Device;
+use crate::device::{Device, DiscoveryMethod};
 use crate::discovery::{
     self, DEFAULT_SCAN_CONCURRENCY, PROBE_TIMEOUT, ProbeResult, SCPI_PROBE_PORTS,
 };
@@ -113,6 +113,29 @@ impl CachedInstrument {
         }
     }
 
+    /// Build a cache entry from an enumerated USB instrument.
+    ///
+    /// USBTMC devices are described by their USB descriptors rather than by an
+    /// `*IDN?` response: opening the interface just to identify the instrument
+    /// would claim it and, on some scopes, disable the LAN SCPI channel. The
+    /// product and serial strings are the closest descriptor-derived match for
+    /// the model and serial fields used by network entries.
+    pub fn from_usb(info: &crate::usb::UsbDeviceInfo, ttl_secs: u64) -> Self {
+        let mut device = Device::usb(info.selector());
+        device.method = DiscoveryMethod::Usb;
+        CachedInstrument {
+            device,
+            idn: String::new(),
+            vendor: info.manufacturer.clone().unwrap_or_default(),
+            model: info.product.clone().unwrap_or_default(),
+            serial: info.serial.clone().unwrap_or_default(),
+            capabilities: Vec::new(),
+            vlan: None,
+            discovered_ms: now_millis(),
+            ttl_secs,
+        }
+    }
+
     /// True when the entry is still within its TTL.
     pub fn is_fresh(&self, now_ms: u64) -> bool {
         now_ms.saturating_sub(self.discovered_ms) < self.ttl_secs.saturating_mul(1000)
@@ -134,6 +157,20 @@ impl CachedInstrument {
     pub fn address(&self) -> IpAddr {
         self.device.address
     }
+
+    /// The address as a user can type it back in: an IP for network
+    /// instruments, or the `usb:...` selector for a USB instrument.
+    pub fn display_address(&self) -> String {
+        self.device.display_address()
+    }
+
+    /// The cache key: the USB selector when present, otherwise the address.
+    pub fn key(&self) -> String {
+        match &self.device.usb {
+            Some(selector) => selector.to_string(),
+            None => self.device.address.to_string(),
+        }
+    }
 }
 
 /// Extract the serial number (the third comma-separated field) from an IDN.
@@ -144,10 +181,10 @@ fn idn_serial(idn: &str) -> String {
         .unwrap_or_default()
 }
 
-/// A TTL cache of discovered instruments, keyed by address.
+/// A TTL cache of discovered instruments, keyed by address or USB selector.
 #[derive(Debug, Clone)]
 pub struct DiscoveryCache {
-    entries: HashMap<IpAddr, CachedInstrument>,
+    entries: HashMap<String, CachedInstrument>,
     default_ttl_secs: u64,
 }
 
@@ -167,19 +204,26 @@ impl DiscoveryCache {
 
     /// Insert or replace an entry.
     pub fn insert(&mut self, entry: CachedInstrument) {
-        self.entries.insert(entry.device.address, entry);
+        self.entries.insert(entry.key(), entry);
     }
 
     /// The fresh entry for an address, if any.
     pub fn get(&self, address: IpAddr) -> Option<&CachedInstrument> {
         self.entries
-            .get(&address)
+            .get(&address.to_string())
+            .filter(|entry| entry.is_fresh(now_millis()))
+    }
+
+    /// The fresh entry for an arbitrary cache key, such as a USB selector.
+    pub fn get_by_key(&self, key: &str) -> Option<&CachedInstrument> {
+        self.entries
+            .get(key)
             .filter(|entry| entry.is_fresh(now_millis()))
     }
 
     /// The entry for an address regardless of freshness.
     pub fn get_any(&self, address: IpAddr) -> Option<&CachedInstrument> {
-        self.entries.get(&address)
+        self.entries.get(&address.to_string())
     }
 
     /// Every fresh entry.
@@ -277,6 +321,8 @@ pub struct DiscoveryOptions {
     pub incremental: bool,
     /// The maximum number of hosts to scan.
     pub max_hosts: usize,
+    /// Enumerate USB (USBTMC) instruments attached to this machine.
+    pub use_usb: bool,
 }
 
 impl Default for DiscoveryOptions {
@@ -293,6 +339,7 @@ impl Default for DiscoveryOptions {
             ttl_secs: DEFAULT_TTL_SECS,
             incremental: true,
             max_hosts: DEFAULT_MAX_HOSTS,
+            use_usb: true,
         }
     }
 }
@@ -380,6 +427,9 @@ impl DiscoveryEngine {
         if !options.extra_hosts.is_empty() {
             strategies.push("static-hosts".to_string());
         }
+        if options.use_usb && crate::usb::is_enabled() {
+            strategies.push("usb".to_string());
+        }
         on_event(DiscoveryEvent::Started {
             strategies: strategies.clone(),
         });
@@ -406,6 +456,10 @@ impl DiscoveryEngine {
         let mdns_handle = options.use_mdns.then(|| {
             std::thread::spawn(move || discovery::discover_mdns(listen_timeout).unwrap_or_default())
         });
+        // USB enumeration is independent of the network and cannot be
+        // broadcast, so it runs on its own thread alongside the scan.
+        let usb_handle = (options.use_usb && crate::usb::is_enabled())
+            .then(|| std::thread::spawn(crate::usb::enumerate));
 
         // 3. Build the host list for direct probing.
         let mut hosts: Vec<IpAddr> = Vec::new();
@@ -461,7 +515,7 @@ impl DiscoveryEngine {
             on_found,
         );
 
-        // 4b. Fold in the broadcast/mDNS results once they have finished.
+        // 4b. Fold in the broadcast/mDNS/USB results once they have finished.
         let mut advertised: Vec<Device> = Vec::new();
         if let Some(handle) = broadcast_handle
             && let Ok(devices) = handle.join()
@@ -473,10 +527,24 @@ impl DiscoveryEngine {
         {
             advertised = discovery::merge_devices(advertised, devices);
         }
-        if !advertised.is_empty() {
+
+        let mut discovered: Vec<CachedInstrument> = advertised
+            .into_iter()
+            .map(|device| CachedInstrument::from_device(device, vlan, options.ttl_secs))
+            .collect();
+        if let Some(handle) = usb_handle
+            && let Ok(devices) = handle.join()
+        {
+            discovered.extend(
+                devices
+                    .into_iter()
+                    .filter(|info| info.is_usbtmc)
+                    .map(|info| CachedInstrument::from_usb(&info, options.ttl_secs)),
+            );
+        }
+        if !discovered.is_empty() {
             let mut cache = self.cache.lock().unwrap();
-            for device in advertised {
-                let entry = CachedInstrument::from_device(device, vlan, options.ttl_secs);
+            for entry in discovered {
                 on_event(DiscoveryEvent::InstrumentFound {
                     instrument: entry.clone(),
                 });
@@ -532,6 +600,55 @@ mod tests {
             device,
             idn: idn.to_string(),
         }
+    }
+
+    fn usb_info(serial: &str, product: &str) -> crate::usb::UsbDeviceInfo {
+        crate::usb::UsbDeviceInfo {
+            id: crate::usb::UsbId::new(0x1AB1, 0x04CE),
+            bus: 1,
+            address: 7,
+            serial: Some(serial.to_string()),
+            manufacturer: Some("RIGOL TECHNOLOGIES".to_string()),
+            product: Some(product.to_string()),
+            interface_number: 0,
+            is_usbtmc: true,
+        }
+    }
+
+    #[test]
+    fn test_cached_instrument_from_usb() {
+        let entry = CachedInstrument::from_usb(&usb_info("DS1ZA1", "DS1000Z Series"), 300);
+        assert_eq!(entry.vendor, "RIGOL TECHNOLOGIES");
+        assert_eq!(entry.model, "DS1000Z Series");
+        assert_eq!(entry.serial, "DS1ZA1");
+        assert_eq!(entry.device.method, DiscoveryMethod::Usb);
+        assert!(entry.device.usb.is_some());
+        assert!(entry.idn.is_empty());
+        assert_eq!(entry.display_address(), "usb:0x1AB1:0x04CE:DS1ZA1");
+    }
+
+    #[test]
+    fn test_cache_keys_usb_by_selector() {
+        let mut cache = DiscoveryCache::new(300);
+        cache.insert(CachedInstrument::from_usb(
+            &usb_info("AAA", "DS1000Z Series"),
+            300,
+        ));
+        cache.insert(CachedInstrument::from_usb(
+            &usb_info("BBB", "DS1000Z Series"),
+            300,
+        ));
+        assert_eq!(cache.len(), 2);
+        assert!(
+            cache
+                .get_by_key("usb:0x1AB1:0x04CE:AAA")
+                .is_some()
+        );
+        assert!(
+            cache
+                .get_by_key("usb:0x1AB1:0x04CE:BBB")
+                .is_some()
+        );
     }
 
     #[test]
@@ -635,6 +752,7 @@ mod tests {
             use_broadcast: false,
             use_mdns: false,
             scan_subnet: false,
+            use_usb: false,
             extra_hosts: Vec::new(),
             ..Default::default()
         };

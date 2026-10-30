@@ -47,7 +47,10 @@ Python scripting plus Omarchy integration.
       `device_lock`, `device_remote`/`local`
 - [x] `transport::raw` — TCP 5025 with newline framing and partial-read handling
 - [x] `discovery` — VXI-11 broadcast `PMAP_DUMP`, merged with mDNS results
+      (parser fixed against the presence-flag XDR list encoding, M0 spike)
 - [x] `discovery` — mDNS/DNS-SD browse of `_lxi`, `_scpi-raw`, `_vxi-11`
+- [x] `discovery` — non-disruptive portmapper-only LXI detection over UDP
+      (`GETPORT`, no VXI-11 link), see [`spikes/M0-portmapper-detection.md`](spikes/M0-portmapper-detection.md)
 - [x] `discovery` — parallel subnet scan with direct SCPI `*IDN?` probes
 - [x] `discovery_engine` — TTL cache with incremental rescans
 - [x] `screenshot` — IEEE-488.2 definite- and indefinite-length block parsing

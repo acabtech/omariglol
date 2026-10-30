@@ -447,6 +447,13 @@ pub const SCPI_PROBE_PORTS: [u16; 2] = [5025, 5555];
 /// fails immediately, and only a silent host pays the full timeout.
 pub const PROBE_TIMEOUT: Duration = Duration::from_millis(200);
 
+/// The per-host timeout for the portmapper probe.
+///
+/// The probe is one UDP datagram (`GETPORT`); a responsive instrument answers
+/// in well under a millisecond, so a short deadline keeps the subnet scan fast
+/// while still tolerating a slow instrument.
+pub const VXI11_PROBE_TIMEOUT: Duration = Duration::from_millis(300);
+
 /// The default number of worker threads a subnet scan uses.
 ///
 /// A `/24` is 253 hosts; at 96 workers and a 200 ms timeout the worst case is
@@ -502,6 +509,35 @@ pub fn probe_scpi_tcp(address: IpAddr, ports: &[u16], timeout: Duration) -> Opti
     None
 }
 
+/// Detect an LXI instrument through its VXI-11 portmapper entry.
+///
+/// Some instruments serve VXI-11 and the portmapper while their raw SCPI
+/// socket is disabled or owned by another interface (for example a scope whose
+/// USB link takes precedence over LAN SCPI). Asking the portmapper for
+/// `DEVICE_CORE` identifies the instrument without opening a VXI-11 link or a
+/// raw socket, so discovery stays non-disruptive.
+///
+/// The query is sent over UDP: a `GETPORT` is one datagram and, on the
+/// hardware measured for this spike, roughly two orders of magnitude faster
+/// than a TCP round trip. RPCBIND is required to answer on both UDP and TCP;
+/// using UDP alone keeps the subnet scan cheap and avoids a second deadline
+/// per silent host.
+pub fn probe_vxi11_tcp(address: IpAddr, timeout: Duration) -> Option<Device> {
+    let port = rpc::pmap_getport_udp(
+        address,
+        vxi11::DEVICE_CORE,
+        vxi11::DEVICE_CORE_VERSION,
+        rpc::IPPROTO_TCP,
+        timeout,
+    )
+    .ok()
+    .flatten()?;
+    let mut device = Device::manual(address);
+    device.method = DiscoveryMethod::Vxi11Portmap;
+    device.vxi11_port = Some(port);
+    Some(device)
+}
+
 /// Scan a list of hosts in parallel, calling `on_found` as each answers.
 ///
 /// `concurrency` worker threads pull hosts from a shared queue, so a `/24`
@@ -540,7 +576,18 @@ pub fn scan_hosts(
                 let Some(host) = host else {
                     break;
                 };
-                if let Some(result) = probe_scpi_tcp(IpAddr::V4(host), &ports, timeout) {
+                let address = IpAddr::V4(host);
+                // VXI-11 first: it is non-disruptive and also works when the
+                // raw SCPI socket is disabled. Only fall back to the raw SCPI
+                // probe when the instrument has no VXI-11 entry.
+                let vxi11_timeout = timeout.max(VXI11_PROBE_TIMEOUT);
+                let found = probe_vxi11_tcp(address, vxi11_timeout)
+                    .map(|device| ProbeResult {
+                        device,
+                        idn: String::new(),
+                    })
+                    .or_else(|| probe_scpi_tcp(address, &ports, timeout));
+                if let Some(result) = found {
                     on_found(&result);
                     results.lock().unwrap().push(result);
                 }

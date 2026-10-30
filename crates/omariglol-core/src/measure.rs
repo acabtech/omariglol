@@ -157,7 +157,7 @@ impl MeasurementResult {
         MeasurementResult {
             instrument_id: instrument.id.to_string(),
             label: instrument.label(),
-            address: instrument.device.address.to_string(),
+            address: instrument.device.display_address(),
             instrument_type: instrument
                 .instrument_type()
                 .unwrap_or(InstrumentType::Unknown),
@@ -253,7 +253,7 @@ fn measure_one(instrument: &Instrument, command_override: Option<&str>) -> Measu
     let mut result = MeasurementResult {
         instrument_id: instrument.id.to_string(),
         label: instrument.label(),
-        address: instrument.device.address.to_string(),
+        address: instrument.device.display_address(),
         instrument_type,
         command: command.clone(),
         value: None,
@@ -267,7 +267,17 @@ fn measure_one(instrument: &Instrument, command_override: Option<&str>) -> Measu
         result.value = Some(idn);
     } else {
         match session.query(&command) {
-            Ok(value) => result.value = Some(plain_number(&value)),
+            Ok(value) => {
+                let value = plain_number(&value);
+                // Instruments answer an unavailable measurement with a
+                // sentinel (`9.9E37` on Rigol scopes). Do not surface that as a
+                // real reading, nor expand it into a 38-digit integer.
+                if is_usable_measurement(&value) {
+                    result.value = Some(value);
+                } else {
+                    result.error = Some(format!("no reading (instrument returned {value})"));
+                }
+            }
             Err(err) => result.error = Some(err.to_string()),
         }
     }

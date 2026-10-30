@@ -16,7 +16,7 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 
 use crate::device::Target;
-use crate::driver::{InstrumentType, classify_idn};
+use crate::driver::{InstrumentType, classify_idn, measure_all_commands};
 use crate::instrument::Instrument;
 use crate::transport::Session;
 use crate::workspace::Workspace;
@@ -156,6 +156,13 @@ fn measure_one(instrument: &Instrument, command_override: Option<&str>) -> Measu
         }
     };
     let instrument_type = classify_idn(&idn);
+
+    // Best-effort: ask the instrument to show all measurements before the
+    // snapshot is taken, so the screenshot is more useful. An instrument
+    // without such a mode rejects the write; that is not a measurement failure.
+    for setup in measure_all_commands(&idn) {
+        let _ = session.send(setup);
+    }
 
     let default = default_measurement(instrument_type);
     let command = command_override

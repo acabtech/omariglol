@@ -10,9 +10,9 @@
 
 use std::io::{BufRead, Write};
 use std::net::IpAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::{Args, Parser, Subcommand};
 
@@ -26,7 +26,7 @@ use omariglol_core::measure;
 use omariglol_core::netconfig;
 use omariglol_core::screenshot;
 use omariglol_core::transport::{self, Session, parse_address, to_hex};
-use omariglol_core::workspace::WorkspaceManager;
+use omariglol_core::workspace::{Workspace, WorkspaceManager};
 use omariglol_script::{ScriptEngine, ScriptEvent, ScriptOptions};
 
 /// Process-wide verbosity, set once from the global `-v` flag.
@@ -765,6 +765,10 @@ fn cmd_run(args: RunArgs) -> anyhow::Result<()> {
 
     vlog!(1, "finished in {:.1} ms", result.duration_ms);
 
+    // The script branch of the panel trigger still snapshots the instruments;
+    // the captures are grouped under the script's name for easy comparison.
+    snapshot_after_script(&args.script);
+
     // Mirror CPython: a non-zero `sys.exit()` code becomes the process status.
     if let Some(code) = result.exit_code {
         if code != 0 {
@@ -828,6 +832,116 @@ fn workspace_dir() -> PathBuf {
             .join("workspaces");
     }
     PathBuf::from("omariglol-workspaces")
+}
+
+/// The snapshot root: `~/Documents/omariglol`.
+fn snapshot_root() -> PathBuf {
+    if let Ok(home) = std::env::var("HOME") {
+        return PathBuf::from(home).join("Documents").join("omariglol");
+    }
+    PathBuf::from("omariglol-snapshots")
+}
+
+/// A filesystem-safe timestamp for the "measure all" snapshot folder.
+fn snapshot_timestamp() -> String {
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    secs.to_string()
+}
+
+/// A millisecond timestamp for individual snapshot files.
+///
+/// Milliseconds keep several instruments captured in one script run from
+/// overwriting each other.
+fn snapshot_file_timestamp() -> String {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0);
+    millis.to_string()
+}
+
+/// Strip characters that would make an instrument label unsafe as a filename.
+fn safe_component(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+    let trimmed = out.trim_matches('_').to_string();
+    if trimmed.is_empty() {
+        "instrument".to_string()
+    } else {
+        trimmed
+    }
+}
+
+/// Capture and save a screenshot of every instrument in the workspace.
+///
+/// Capture goes through [`screenshot::capture_from_address`], which probes the
+/// vendor raw SCPI ports before falling back to VXI-11 — raw TCP is the fastest
+/// way to pull the image. Failures are reported on stderr and never abort the
+/// loop, so one silent instrument cannot stop the others.
+///
+/// Every file is named `<instrument>-<timestamp>.<ext>`, so a multi-device run
+/// keeps each reading distinguishable within the shared folder.
+fn capture_workspace_snapshots(workspace: &Workspace, dir: &Path) {
+    if workspace.instruments.is_empty() {
+        return;
+    }
+    if let Err(err) = std::fs::create_dir_all(dir) {
+        eprintln!("snapshot: cannot create {}: {err}", dir.display());
+        return;
+    }
+
+    for instrument in &workspace.instruments {
+        match screenshot::capture_from_address(
+            instrument.device.address,
+            instrument.config.timeout(),
+            None,
+        ) {
+            Ok(shot) => {
+                let path = dir.join(format!(
+                    "{}-{}.{}",
+                    safe_component(&instrument.label()),
+                    snapshot_file_timestamp(),
+                    shot.format.extension()
+                ));
+                match std::fs::write(&path, &shot.data) {
+                    Ok(()) => eprintln!("snapshot: wrote {}", path.display()),
+                    Err(err) => eprintln!("snapshot: {}: {err}", path.display()),
+                }
+            }
+            Err(err) => eprintln!("snapshot: {}: {err}", instrument.label()),
+        }
+    }
+}
+
+/// Snapshot the active workspace into a folder named after the script.
+///
+/// `riglol run` is the "script is loaded" branch of the panel trigger, so its
+/// captures are grouped under the script's stem rather than a timestamp.
+fn snapshot_after_script(script: &Path) {
+    let mut manager = WorkspaceManager::with_dir(workspace_dir());
+    if manager.load_all().is_err() {
+        return;
+    }
+    let Some(workspace) = manager.active() else {
+        return;
+    };
+
+    let name = script
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .filter(|stem| !stem.is_empty())
+        .unwrap_or("script");
+    let dir = snapshot_root().join(safe_component(name));
+    capture_workspace_snapshots(workspace, &dir);
 }
 
 fn cmd_workspace(args: WorkspaceArgs) -> anyhow::Result<()> {
@@ -937,6 +1051,11 @@ fn cmd_measure(args: MeasureArgs) -> anyhow::Result<()> {
     } else {
         print_measure_table(&report);
     }
+
+    // Snapshot every instrument after measuring. The panel runs with `--json`,
+    // so progress goes to stderr and never corrupts the JSON on stdout.
+    let dir = snapshot_root().join(snapshot_timestamp());
+    capture_workspace_snapshots(workspace, &dir);
     Ok(())
 }
 

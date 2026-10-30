@@ -276,6 +276,23 @@ pub fn capture(
     })
 }
 
+/// Capture a screenshot from an address over the fastest available transport.
+///
+/// The instrument is identified first, so the correct vendor profile and raw
+/// SCPI port are selected; raw TCP is preferred over VXI-11 because it streams
+/// the image at TCP speed.
+pub fn capture_from_address(
+    address: IpAddr,
+    timeout: Duration,
+    custom_command: Option<&str>,
+) -> Result<Screenshot> {
+    let mut transport = open_default_transport(address, timeout)?;
+    let idn = String::from_utf8_lossy(&transport.query("*IDN?")?)
+        .trim()
+        .to_string();
+    capture(transport.as_mut(), &idn, custom_command)
+}
+
 /// Extract the payload from an IEEE-488.2 definite-length block.
 ///
 /// Accepts `#<n><len><data>` and `#0<data>` (indefinite, newline-terminated).

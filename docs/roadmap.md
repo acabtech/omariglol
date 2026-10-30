@@ -14,13 +14,16 @@ USB work is pulled forward out of 0.2.0. The full plan is in
 - [x] `riglol scpi|screenshot|benchmark|driver --usb`
 - [x] `riglol usb list`
 - [x] Linux udev rule and installer for libusb permissions
-- [ ] Hardware round-trip verification after the udev rule is installed
+- [x] Hardware round-trip verification after the udev rule is installed
+- [x] USB instruments merged into `discover` and workspace snapshots
+- [x] Non-disruptive UDP portmapper LXI detection (M0 spike)
+- [x] `PMAP_DUMP` presence-flag decoding fix for broadcast discovery
 
 ### 0.1.4 — generic USBTMC and USB discovery
 
-- [ ] Any USBTMC-class instrument
+- [ ] Any USBTMC-class instrument verified on hardware
 - [ ] Hotplug events
-- [ ] USB merged into discovery and the Discovery panel
+- [x] USB merged into discovery and the Discovery panel
 
 ### 0.1.5 — SUMP capture
 

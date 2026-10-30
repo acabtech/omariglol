@@ -38,8 +38,8 @@ The whole instrument-facing surface. Module map:
 | `measure` | Parallel measurement fan-out across a workspace |
 | `autoscale` | Parallel autoscale across instruments that support it |
 | `netconfig` | Local interface, subnet, gateway and VLAN detection |
-| `discovery` | VXI-11 broadcast, mDNS/DNS-SD and direct SCPI probes |
-| `discovery_engine` | Cached multi-strategy discovery with TTL and incremental rescans |
+| `discovery` | VXI-11 broadcast, UDP portmapper detection, mDNS/DNS-SD and direct SCPI probes |
+| `discovery_engine` | Cached multi-strategy discovery with TTL, incremental rescans and USB enumeration |
 | `screenshot` | IEEE-488.2 block parsing, per-vendor capture profiles |
 | `benchmark` | SCPI round-trip statistics |
 
@@ -57,24 +57,37 @@ marking, `AUTH_NULL` credentials, and two portmapper calls — because:
 
 #### Discovery
 
-Three mechanisms, deliberately independent:
+Four network mechanisms plus local USB enumeration, deliberately independent:
 
 - **VXI-11 broadcast.** A `PMAP_DUMP` RPC call sent to the broadcast address on
   port 111. Hosts that answer *and* have program `0x0607AF` (VXI-11
   `DEVICE_CORE`) registered on TCP are instruments. Subnet-local by design,
   which is also its limitation.
+- **UDP portmapper fallback.** A unicast `GETPORT` for `DEVICE_CORE`, used by
+  the subnet scan when raw SCPI is unavailable. It identifies an instrument
+  without creating a VXI-11 link or opening a raw socket, so repeated discovery
+  does not disturb the instrument. This is the mechanism required for scopes
+  whose LAN SCPI is disabled while USB is attached.
 - **mDNS / DNS-SD.** Browse `_lxi._tcp.local`, `_scpi-raw._tcp.local` and
   `_vxi-11._tcp.local` on `224.0.0.251`. Finds instruments that advertise
   themselves and can cross a routed boundary.
 - **Subnet scan.** Direct SCPI `*IDN?` probes over TCP (port 5025, Rigol's 5555
   and the other known vendor ports) against the local subnet and any extra
   hosts, run in parallel with a bounded timeout.
+- **USB enumeration.** Any attached USBTMC interface becomes a `Device` keyed by
+  its vendor/product ids (and serial when readable). Opening the interface is
+  not required for detection, so LAN SCPI is not pre-empted.
 
-Results from all three are merged by IP address, preferring the record with more
+Network results are merged by IP address, preferring the record with more
 information, so an mDNS hit supplies a friendly name for a device that the
-broadcast only found as a bare IP. The `discovery_engine` wraps the strategies
-in a TTL cache and can rescan incrementally, skipping hosts whose entry is still
-fresh.
+broadcast only found as a bare IP. USB results are keyed by their selector.
+The `discovery_engine` wraps every strategy in a TTL cache and can rescan
+incrementally, skipping network hosts whose entry is still fresh.
+
+The portmapper path was measured in
+[`spikes/M0-portmapper-detection.md`](spikes/M0-portmapper-detection.md): UDP
+`GETPORT` is stable across repeated runs and roughly two orders of magnitude
+faster than a TCP round trip.
 
 ### `omariglol-script`
 
@@ -101,16 +114,20 @@ with connect("192.168.1.50") as inst:
 A `clap`-derived binary. Subcommands mirror `lxi` so muscle memory transfers:
 
 ```
-riglol discover [--mdns] [--timeout N] [--json] [--add]
-riglol scpi [--raw] [--port N] [--hex] <address> [command...]
-riglol screenshot [--raw|--vxi11] [--command CMD] <address> <file>
-riglol benchmark [--count N] [--command CMD] [--json] <address>
+riglol discover [--mdns] [--no-scan] [--no-usb] [--timeout N] [--json] [--add]
+riglol scpi [--raw|--usb] [--port N] [--hex] <address> [command...]
+riglol screenshot [--raw|--vxi11|--usb] [--command CMD] <address> <file>
+riglol benchmark [--raw|--usb] [--count N] [--command CMD] [--json] <address>
 riglol run <script.py> [args...]
-riglol driver [--raw] [--json] <address>
+riglol driver [--raw|--usb] [--json] <address>
+riglol usb list [--json]
 riglol workspace list|create|show
 riglol measure [--workspace NAME] [--command CMD] [--json]
 riglol autoscale [--workspace NAME] [--json]
 ```
+
+USB addresses use `usb:0xVVVV:0xPPPP[:SERIAL|BUS.ADDR]`, e.g.
+`usb:0x1AB1:0x04CE:DS1ZA203012565`.
 
 ## Desktop app
 

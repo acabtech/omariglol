@@ -34,6 +34,20 @@ with connect(ADDRESS) as scope:
     ...
 ```
 
+### USB (USBTMC)
+
+Pass `transport="usb"` and a `usb:0xVVVV:0xPPPP[:SERIAL]` selector. The same
+instrument object works over USB, so the rest of a script is unchanged:
+
+```python
+with connect("usb:0x1AB1:0x04CE", transport="usb") as scope:
+    print(scope.idn())
+```
+
+See [`16_usb.py`](16_usb.py). On Linux, install
+[`scripts/install-usb-udev.sh`](../../scripts/install-usb-udev.sh) once so libusb
+can open the device.
+
 ### Multi-instrument scripts
 
 For scripts that span several instruments, use the `Workspace` API instead. It
@@ -69,6 +83,7 @@ See [`15_workspace.py`](15_workspace.py) for a full example.
 | [`13_sweep_chart.py`](13_sweep_chart.py) | Live frequency chart | `:MEAS:FREQ?` |
 | [`14_csv_log.py`](14_csv_log.py) | Log measurements to CSV | `:MEAS:*?` |
 | [`15_workspace.py`](15_workspace.py) | Multi-instrument workspace | `Workspace` API |
+| [`16_usb.py`](16_usb.py) | Identify the instrument over USB | `*IDN?`, `:MEAS:FREQ?` |
 
 ## See also
 

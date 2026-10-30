@@ -44,6 +44,21 @@ with `RIGLOL_TIMEOUT`:
 RIGLOL_TIMEOUT=30 ./17_reset.sh
 ```
 
+## USB (USBTMC)
+
+[`18_usb.sh`](18_usb.sh) drives the same instrument over USB. Pass a
+`usb:0xVVVV:0xPPPP[:SERIAL]` selector, or use the default DS1054Z ids. On Linux,
+install the bundled udev rule once:
+
+```sh
+sudo scripts/install-usb-udev.sh
+./18_usb.sh
+./18_usb.sh usb:0x1AB1:0x04CE:DS1ZA203012565   # pin to a serial
+```
+
+`riglol usb list` shows every attached device and whether it exposes a USBTMC
+interface.
+
 ## The examples
 
 [`00_smoke_test.sh`](00_smoke_test.sh) runs every function below end to end,
@@ -75,6 +90,7 @@ RIGLOL_DELAY=2 ./00_smoke_test.sh       # or via the environment
 | [`15_discover.sh`](15_discover.sh) | Find instruments on the network | `riglol discover` |
 | [`16_driver.sh`](16_driver.sh) | Show the named command surface | `riglol driver` |
 | [`17_reset.sh`](17_reset.sh) | Reset and self-test | `*CLS`, `*RST`, `*TST?` |
+| [`18_usb.sh`](18_usb.sh) | Enumerate and identify over USB | `*IDN?`, `:MEAS:FREQ?` |
 
 ## Interactive use
 

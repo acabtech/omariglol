@@ -3,8 +3,8 @@
 **A native-to-Omarchy reimplementation of [lxi-tools](https://github.com/lxi-tools/lxi-tools).**
 
 `omariglol` talks to LXI / SCPI test instruments — oscilloscopes, power supplies,
-signal generators, DMMs — over VXI-11 and raw TCP, and presents them through a
-CLI, a themed desktop app, and the Omarchy shell itself.
+signal generators, DMMs — over VXI-11, raw TCP and USB (USBTMC), and presents
+them through a CLI, a themed desktop app, and the Omarchy shell itself.
 
 The name is a portmanteau of *Omarchy* and *RigLOL*, but it is vendor-neutral:
 anything that speaks SCPI is fair game.
@@ -44,14 +44,14 @@ Three frontends over one protocol core:
                              │
                   ┌──────────┴───────────┐
                   │   omariglol-core     │
-                  │   VXI-11 · raw TCP   │
+                  │ VXI-11 · raw · USBTMC│
                   │   discovery · SCPI   │
                   └──────────────────────┘
 ```
 
 | Component | Path | Role |
 | --- | --- | --- |
-| `omariglol-core` | `crates/omariglol-core` | Protocol core: VXI-11 over ONC RPC, raw socket SCPI, discovery, screenshot, benchmark |
+| `omariglol-core` | `crates/omariglol-core` | Protocol core: VXI-11 over ONC RPC, raw socket SCPI, USBTMC, discovery, screenshot, benchmark |
 | `omariglol-script` | `crates/omariglol-script` | Embedded CPython scripting engine |
 | `omariglol` CLI | `crates/omariglol-cli` | Command-line interface, feature-parity with `lxi` |
 | Desktop app | `src-tauri` + `src` | Tauri 2 shell with a React/TypeScript frontend |
@@ -65,9 +65,9 @@ The CLI mirrors `lxi-tools`, with Python in place of Lua:
 
 | Command | Status | Notes |
 | --- | --- | --- |
-| `riglol discover` | implemented | VXI-11 broadcast, mDNS/DNS-SD, subnet scan, TTL cache, `--json`, `--add` |
+| `riglol discover` | implemented | VXI-11 broadcast, non-disruptive UDP portmapper detection, mDNS/DNS-SD, subnet scan, USB enumeration, TTL cache, `--json`, `--add`, `--no-usb` |
 | `riglol scpi` | implemented | VXI-11, `--raw` or `--usb` (USBTMC), hex output, interactive mode |
-| `riglol screenshot` | implemented | IEEE-488.2 block capture, per-vendor profiles, `--command` override, `--usb` |
+| `riglol screenshot` | implemented | IEEE-488.2 block capture, per-vendor profiles, `--command` override, `--usb`, automatic VXI-11 fallback when raw SCPI is unavailable |
 | `riglol benchmark` | implemented | SCPI round-trip statistics, `--json`, `--usb` |
 | `riglol usb list` | implemented | Enumerate USB instruments and their USBTMC interface status |
 | `riglol run` | implemented | Execute a Python measurement script |
@@ -131,6 +131,11 @@ npm run build
 # Desktop app
 npm run tauri dev
 ```
+
+## Release notes
+
+See [`CHANGELOG.md`](CHANGELOG.md) for the 0.1.3 changes, including USB
+discovery, non-disruptive portmapper detection and the `PMAP_DUMP` fix.
 
 ## Roadmap
 

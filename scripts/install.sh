@@ -230,6 +230,13 @@ install_plugin() {
   local src="$here/omarchy/plugin"
   [[ -d "$src" ]] || die "plugin directory not found at $src"
   local dest="$target_home/.config/omarchy/plugins/acabtech.omariglol"
+  local section="${OMARIGLOL_PLUGIN_SECTION:-right}"
+
+  # `omarchy plugin add <git-url>` clones the repository and validates
+  # manifest.json *at the clone root*. Our plugin lives in omarchy/plugin/ of
+  # the umbrella repository, so there is no git URL that satisfies it; the
+  # plugins directory is omarchy's other supported discovery path, so install
+  # the tree there and enable it.
   log "installing the shell plugin to $dest"
   mkdir -p "$(dirname "$dest")"
   # Replace the plugin tree wholesale so a newer version's dropped files do not
@@ -237,14 +244,26 @@ install_plugin() {
   rm -rf "$dest"
   cp -r "$src" "$dest"
   own "$(dirname "$dest")"
-  if have omarchy; then
-    log "registering the plugin with omarchy"
-    omarchy plugin add "$dest" --enable >/dev/null 2>&1 ||
-      omarchy plugin enable acabtech.omariglol >/dev/null 2>&1 ||
-      warn "could not register the plugin; use Setup > Plugins in the Omarchy menu"
-  else
+
+  if ! have omarchy; then
     warn "omarchy not found; enable the plugin via Setup > Plugins"
+    return 0
   fi
+
+  log "enabling acabtech.omariglol in the bar (--section $section)"
+  omarchy shell rescanPlugins >/dev/null 2>&1 || true
+
+  # A bar widget needs a *section*. `omarchy plugin enable <id>` with no
+  # placement marks it enabled but never adds it to the bar layout, so the
+  # widget is silently absent. Always pass --section.
+  if ! omarchy plugin enable acabtech.omariglol --section "$section"; then
+    warn "could not enable the plugin"
+    warn "run: omarchy plugin enable acabtech.omariglol --section $section"
+    warn "or use Setup > Plugins in the Omarchy menu"
+    return 0
+  fi
+
+  log "plugin enabled; it appears in the $section bar section after a shell restart"
 }
 
 restart_shell() {
@@ -256,6 +275,28 @@ restart_shell() {
   else
     warn "omarchy not found; restart the shell manually"
   fi
+}
+
+# Confirm the plugin ended up enabled and in the bar, and say plainly what to do
+# if it did not. A plugin that is installed but not placed is invisible, which
+# is the failure this guards against.
+verify_plugin() {
+  have omarchy || return 0
+  local listing
+  listing="$(omarchy plugin list --json 2>/dev/null || true)"
+  case "$listing" in
+    *'"id":"acabtech.omariglol"'*)
+      if printf '%s' "$listing" | grep -q '"id":"acabtech.omariglol"[^}]*"enabled":true'; then
+        log "verified: acabtech.omariglol is enabled"
+      else
+        warn "acabtech.omariglol is installed but disabled"
+        warn "run: omarchy plugin enable acabtech.omariglol right"
+      fi
+      ;;
+    *)
+      warn "acabtech.omariglol was not discovered by omarchy"
+      ;;
+  esac
 }
 
 # --- Main -------------------------------------------------------------------
@@ -275,6 +316,7 @@ if [[ "$theme_only" == 0 ]]; then
   setup_config
   install_plugin
   restart_shell
+  verify_plugin
 fi
 
 log "omariglol installed"

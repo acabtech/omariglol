@@ -6,13 +6,16 @@ Two independent pieces.
 omarchy/
 ├── themed/
 │   └── omariglol-theme.toml.tpl   # rendered by Omarchy on every theme switch
-├── plugin/                        # Quickshell bar widget
-│   ├── manifest.json
-│   ├── BarWidget.qml
-│   ├── Panel.qml
-│   └── Model.js
-└── install.sh                     # copies both into place
+└── plugin/                        # Quickshell bar widget
+    ├── manifest.json
+    ├── BarWidget.qml
+    ├── Panel.qml
+    └── Model.js
 ```
+
+Installing both is done by the single installer,
+[`scripts/install.sh`](../scripts/install.sh); there is deliberately no second
+installer in this directory.
 
 The design is summarised here and in
 [`docs/omarchy-integration.md`](../docs/omarchy-integration.md).
@@ -32,6 +35,8 @@ cp omarchy/themed/omariglol-theme.toml.tpl ~/.config/omarchy/themed/
 # Then switch theme once to generate the file.
 ```
 
+Or let [`scripts/install.sh`](../scripts/install.sh) do it.
+
 Full variable reference: [`docs/omarchy-integration.md`](../docs/omarchy-integration.md).
 
 ## Shell plugin
@@ -39,8 +44,24 @@ Full variable reference: [`docs/omarchy-integration.md`](../docs/omarchy-integra
 A Quickshell `bar-widget` that measures every instrument in the active
 workspace from the top bar.
 
+Use [`scripts/install.sh`](../scripts/install.sh), which copies the plugin into
+`~/.config/omarchy/plugins/` and enables it:
+
 ```bash
-omarchy plugin add /path/to/omariglol/omarchy/plugin --enable
+scripts/install.sh --plugin-only
+```
+
+`omarchy plugin add <git-url>` is not applicable here: it clones a repo and
+requires `manifest.json` at the clone root, while this plugin lives in
+`omarchy/plugin/` of the umbrella repository. A directory dropped into
+`~/.config/omarchy/plugins/` is the supported path for a plugin shipped inside
+a larger project.
+
+A bar widget also needs a **section**; enabling it without one leaves it
+enabled but invisible. If you enable it by hand:
+
+```bash
+omarchy plugin enable acabtech.omariglol --section right
 ```
 
 The plugin does not speak SCPI itself — it shells out to the `riglol` binary.

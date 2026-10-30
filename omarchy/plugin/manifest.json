@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "acabtech.omariglol",
   "name": "omariglol",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "author": "Sam Ralial",
   "license": "MIT",
   "description": "Measure every instrument in the active workspace from the Omarchy bar.",

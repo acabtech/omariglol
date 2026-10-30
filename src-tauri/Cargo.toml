@@ -1,6 +1,6 @@
 [package]
 name = "omariglol"
-version = "0.1.0"
+version = "0.1.1"
 description = "LXI / SCPI instrument control for the Omarchy desktop"
 authors = ["Sam Ralial <sam@alatcerdas.tech>"]
 license = "MIT"

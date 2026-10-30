@@ -165,8 +165,13 @@ build_binaries() {
 
 # --- Install steps ----------------------------------------------------------
 install_cli() {
+  # A source checkout builds into target/release; a release bundle ships the
+  # prebuilt binary in bin/. Accept either so `--no-build` works from both.
   local src="$here/target/release/riglol"
-  [[ -x "$src" ]] || die "CLI binary not found at $src; run without --no-build"
+  if [[ ! -x "$src" && -x "$here/bin/riglol" ]]; then
+    src="$here/bin/riglol"
+  fi
+  [[ -x "$src" ]] || die "CLI binary not found at target/release/riglol or bin/riglol; run without --no-build"
   if [[ "$system_install" == 1 ]]; then
     ensure_root
     log "installing the CLI to /usr/local/bin/riglol"

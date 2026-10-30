@@ -6,6 +6,9 @@
 # Published build output (see Makefile)
 /bin/
 
+# Locally assembled release bundles (see the release zip instructions)
+/dist-release/
+
 # Node / frontend
 node_modules/
 dist/

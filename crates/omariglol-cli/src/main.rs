@@ -16,6 +16,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::{Args, Parser, Subcommand};
 
+use omariglol_core::autoscale;
 use omariglol_core::benchmark::{self, BenchmarkOptions, BenchmarkReport};
 use omariglol_core::device::{Target, Transport};
 use omariglol_core::discovery_engine::{
@@ -92,6 +93,9 @@ pub enum Command {
 
     /// Measure every instrument in a workspace at once.
     Measure(MeasureArgs),
+
+    /// Autoscale every instrument in a workspace that supports it.
+    Autoscale(AutoscaleArgs),
 }
 
 #[derive(Debug, Args)]
@@ -175,6 +179,17 @@ pub struct MeasureArgs {
     /// Override the measurement query for every instrument.
     #[arg(long, value_name = "COMMAND")]
     pub command: Option<String>,
+
+    /// Emit JSON instead of a table.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct AutoscaleArgs {
+    /// The workspace to autoscale (name or id). Defaults to the active one.
+    #[arg(long, value_name = "NAME")]
+    pub workspace: Option<String>,
 
     /// Emit JSON instead of a table.
     #[arg(long)]
@@ -315,6 +330,7 @@ fn main() -> anyhow::Result<()> {
         Command::Driver(args) => cmd_driver(args),
         Command::Workspace(args) => cmd_workspace(args),
         Command::Measure(args) => cmd_measure(args),
+        Command::Autoscale(args) => cmd_autoscale(args),
     }
 }
 
@@ -1159,6 +1175,79 @@ fn print_measure_table(report: &measure::MeasureReport) {
         "\n{} measured, {} ok, {} failed in {:.0} ms",
         report.measured(),
         report.succeeded(),
+        report.failed(),
+        report.elapsed_ms
+    );
+}
+
+// ---------------------------------------------------------------------------
+// autoscale
+// ---------------------------------------------------------------------------
+
+/// Autoscale every instrument in a workspace that supports it.
+fn cmd_autoscale(args: AutoscaleArgs) -> anyhow::Result<()> {
+    let dir = workspace_dir();
+    let mut manager = WorkspaceManager::with_dir(&dir);
+    manager.load_all()?;
+
+    let workspace = match &args.workspace {
+        Some(name) => manager
+            .list()
+            .iter()
+            .find(|workspace| &workspace.name == name || workspace.id.as_str() == name)
+            .ok_or_else(|| anyhow::anyhow!("no workspace '{name}' in {}", dir.display()))?,
+        None => manager.active().ok_or_else(|| {
+            anyhow::anyhow!(
+                "no workspace in {}; create one with `riglol workspace create <name>`",
+                dir.display()
+            )
+        })?,
+    };
+
+    if workspace.instruments.is_empty() {
+        anyhow::bail!("workspace '{}' has no instruments", workspace.name);
+    }
+
+    vlog!(
+        1,
+        "autoscaling {} instrument(s) in '{}'",
+        workspace.instruments.len(),
+        workspace.name
+    );
+    let report = autoscale::autoscale_workspace(workspace);
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        print_autoscale_table(&report);
+    }
+    Ok(())
+}
+
+/// Render an autoscale report as a table plus a one-line summary.
+fn print_autoscale_table(report: &autoscale::AutoscaleReport) {
+    let rows: Vec<Vec<String>> = report
+        .results
+        .iter()
+        .map(|result| {
+            let status = match (&result.error, result.executed) {
+                (Some(error), _) => format!("! {error}"),
+                (None, true) => "autoscaled".to_string(),
+                (None, false) => "not supported".to_string(),
+            };
+            vec![
+                result.label.clone(),
+                result.instrument_type.label().to_string(),
+                status,
+                format!("{:.1} ms", result.elapsed_ms),
+            ]
+        })
+        .collect();
+    print_table(&["INSTRUMENT", "TYPE", "STATUS", "TIME"], &rows);
+    println!(
+        "\n{} autoscaled, {} skipped, {} failed in {:.0} ms",
+        report.executed(),
+        report.skipped(),
         report.failed(),
         report.elapsed_ms
     );

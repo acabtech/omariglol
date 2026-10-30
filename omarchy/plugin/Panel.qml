@@ -46,6 +46,9 @@ Panel {
   property bool measuring: false
   property string lastError: ""
 
+  property bool autoscaling: false
+  property string autoscaleStatus: ""
+
   property var discovery: null
   property bool detecting: false
   property string discoveryError: ""
@@ -59,7 +62,7 @@ Panel {
 
   readonly property bool hasScript: root.scriptPath !== ""
   readonly property bool busy: root.measuring || root.runningScript
-  readonly property bool anyBusy: root.busy || root.detecting || root.pickingScript
+  readonly property bool anyBusy: root.busy || root.autoscaling || root.detecting || root.pickingScript
   readonly property string triggerLabel: root.hasScript ? "RUN SCRIPT" : "MEASURE ALL"
   readonly property string detectLabel: root.detecting
     ? "SCANNING\u2026"
@@ -119,6 +122,14 @@ Panel {
   // ---- Actions.
   function refresh() {
     root.measure()
+  }
+
+  // Ask every instrument that supports it to fit its display to the signal.
+  function autoscale() {
+    if (root.anyBusy) return
+    root.autoscaling = true
+    root.autoscaleStatus = ""
+    autoscaleProc.running = true
   }
 
   function measure() {
@@ -209,6 +220,29 @@ Panel {
       if (code !== 0 && root.measuring) {
         root.measuring = false
         if (!root.lastError) root.lastError = root.binary + " exited " + code
+      }
+    }
+  }
+
+  Process {
+    id: autoscaleProc
+    command: Model.autoscaleCommand(root.binary, root.workspace)
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        root.autoscaling = false
+        var parsed = Model.parseReport(text)
+        if (parsed) {
+          root.autoscaleStatus = Model.autoscaleSummary(parsed)
+        } else {
+          root.autoscaleStatus = Model.firstLine(text) || "autoset failed"
+        }
+      }
+    }
+    onExited: function(code) {
+      if (code !== 0 && root.autoscaling) {
+        root.autoscaling = false
+        if (!root.autoscaleStatus) root.autoscaleStatus = root.binary + " exited " + code
       }
     }
   }
@@ -381,7 +415,7 @@ Panel {
 
             Rectangle {
               id: triggerButton
-              width: Math.max(0, parent.width - detectButton.width - parent.spacing)
+              width: Math.max(0, parent.width - autosetButton.width - detectButton.width - parent.spacing * 2)
               height: Style.space(40)
               radius: Style.cornerRadius
               color: triggerMouse.containsMouse && !root.anyBusy
@@ -411,6 +445,42 @@ Panel {
                 cursorShape: root.anyBusy ? Qt.ArrowCursor : Qt.PointingHandCursor
                 enabled: !root.anyBusy
                 onClicked: root.trigger()
+              }
+            }
+
+            Rectangle {
+              id: autosetButton
+              width: autosetText.implicitWidth + Style.space(26)
+              height: triggerButton.height
+              radius: Style.cornerRadius
+              color: autosetMouse.containsMouse && !root.anyBusy
+                ? Style.hoverFillFor(root.contentForeground, Commons.Color.accent)
+                : "transparent"
+              border.width: Style.spacing.hairline
+              border.color: root.autoscaling
+                ? Style.normalBorderFor(root.contentForeground, Commons.Color.accent)
+                : Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.22)
+
+              Text {
+                id: autosetText
+                anchors.centerIn: parent
+                text: root.autoscaling ? "AUTOSET\u2026" : "AUTOSET"
+                color: root.autoscaling
+                  ? Qt.darker(root.contentForeground, 1.5)
+                  : root.contentForeground
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.bodySmall
+                font.bold: true
+                font.letterSpacing: 1
+              }
+
+              MouseArea {
+                id: autosetMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: root.anyBusy ? Qt.ArrowCursor : Qt.PointingHandCursor
+                enabled: !root.anyBusy
+                onClicked: root.autoscale()
               }
             }
 
@@ -449,6 +519,18 @@ Panel {
                 onClicked: root.detect()
               }
             }
+          }
+
+          Text {
+            visible: root.autoscaleStatus !== ""
+            width: parent.width - Style.space(32)
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: root.autoscaleStatus
+            color: Qt.darker(root.contentForeground, 1.4)
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.caption
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.WordWrap
           }
 
           // ---- Workspace instrument list.

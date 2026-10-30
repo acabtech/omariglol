@@ -24,6 +24,13 @@ function measureCommand(binary, workspace, command) {
   return args;
 }
 
+/** The argv for `riglol autoscale --json`. */
+function autoscaleCommand(binary, workspace) {
+  var args = [binary || "riglol", "autoscale", "--json"];
+  if (workspace) args.push("--workspace", String(workspace));
+  return args;
+}
+
 /**
  * The argv for a full discovery pass, including mDNS and the subnet scan.
  *
@@ -249,6 +256,25 @@ function resultValue(result) {
   if (result.value === undefined || result.value === null || result.value === "")
     return "-";
   return String(result.value);
+}
+
+/** A one-line summary of an autoscale report. */
+function autoscaleSummary(report) {
+  if (!report || !Array.isArray(report.results)) return "";
+  var total = report.results.length;
+  var executed = 0;
+  var skipped = 0;
+  var failed = 0;
+  for (var i = 0; i < total; i++) {
+    var r = report.results[i];
+    if (r.error) failed++;
+    else if (r.executed) executed++;
+    else skipped++;
+  }
+  var parts = [executed + " autoscaled"];
+  if (skipped > 0) parts.push(skipped + " skipped");
+  if (failed > 0) parts.push(failed + " failed");
+  return parts.join(" \u00B7 ");
 }
 
 /** A one-line summary of a report, e.g. "3 measured · 1 failed". */

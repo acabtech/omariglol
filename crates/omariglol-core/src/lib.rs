@@ -46,6 +46,7 @@
 // implementations will use. Drop this allow once they are implemented.
 #![allow(dead_code)]
 
+pub mod autoscale;
 pub mod benchmark;
 pub mod connection;
 pub mod device;
@@ -69,6 +70,7 @@ pub use error::{Error, Result};
 pub use transport::{ScpiTransport, Session};
 
 // Multi-instrument platform entities (concepts.md §4).
+pub use autoscale::{AutoscaleReport, AutoscaleResult, autoscale_workspace};
 pub use connection::Connection;
 pub use driver::{InstrumentDriver, InstrumentType};
 pub use instrument::{Instrument, InstrumentConfig, InstrumentId, InstrumentState};

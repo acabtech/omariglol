@@ -85,6 +85,21 @@ fn is_usable_measurement(value: &str) -> bool {
     }
 }
 
+/// Render a reading as a plain decimal number.
+///
+/// Instruments answer with scientific notation (`3.120000e+00`,
+/// `-2.081299e-02`). Keeping that text verbatim leaks exponents into the CSV,
+/// the JSON report and the shell panel, so parse it and let `f64`'s `Display`
+/// write the shortest decimal form instead: `3.12`, `-0.02081299`, `1000`.
+/// Non-numeric replies (`*IDN?`, error text) pass through unchanged.
+pub fn plain_number(value: &str) -> String {
+    let trimmed = value.trim();
+    match trimmed.parse::<f64>() {
+        Ok(number) if number.is_finite() => format!("{number}"),
+        _ => trimmed.to_string(),
+    }
+}
+
 /// Query every measurement an instrument's driver exposes.
 ///
 /// Errors and placeholder answers are omitted, so the result is only what the
@@ -99,7 +114,7 @@ pub fn collect_measurements(
         let Ok(raw) = transport.query(&scpi) else {
             continue;
         };
-        let value = String::from_utf8_lossy(&raw).trim().to_string();
+        let value = plain_number(&String::from_utf8_lossy(&raw));
         if is_usable_measurement(&value) {
             detected.push(DetectedMeasurement {
                 name,
@@ -252,7 +267,7 @@ fn measure_one(instrument: &Instrument, command_override: Option<&str>) -> Measu
         result.value = Some(idn);
     } else {
         match session.query(&command) {
-            Ok(value) => result.value = Some(value),
+            Ok(value) => result.value = Some(plain_number(&value)),
             Err(err) => result.error = Some(err.to_string()),
         }
     }
@@ -338,6 +353,23 @@ mod tests {
         // Writes and non-measurement commands are excluded.
         assert!(!queries.iter().any(|(name, ..)| name == "measure_clear"));
         assert!(!queries.iter().any(|(name, ..)| name == "run"));
+    }
+
+    #[test]
+    fn test_plain_number_drops_scientific_notation() {
+        assert_eq!(plain_number("3.120000e+00"), "3.12");
+        assert_eq!(plain_number("-2.081299e-02"), "-0.02081299");
+        assert_eq!(plain_number("5.000000e-04"), "0.0005");
+        assert_eq!(plain_number("9.999999e+02"), "999.9999");
+        // Whole numbers lose the trailing `.0` and stay integers.
+        assert_eq!(plain_number("1.000000e+03"), "1000");
+        assert_eq!(plain_number("3.000000e+00"), "3");
+        // Non-numeric replies are preserved.
+        assert_eq!(
+            plain_number("RIGOL TECHNOLOGIES,DS1054Z,0,1.0"),
+            "RIGOL TECHNOLOGIES,DS1054Z,0,1.0"
+        );
+        assert_eq!(plain_number(""), "");
     }
 
     #[test]

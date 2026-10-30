@@ -914,11 +914,17 @@ fn write_measurement_csv(
 
 /// Capture a screenshot and a measurement CSV for every workspace instrument.
 ///
-/// The transport is opened through [`screenshot::open_default_transport`],
-/// which probes the vendor raw SCPI ports before falling back to VXI-11 — raw
-/// TCP is the fastest way to pull the image. Measurements are collected on the
-/// same connection before the capture, since the Rigol family has no
-/// "measure all" mode to enable on the device.
+/// Measurements are collected first over a transport opened through
+/// [`screenshot::open_default_transport`], which probes the vendor raw SCPI
+/// ports — raw TCP is the fastest way to pull the image. That session is then
+/// closed and the image is captured over a *fresh* connection.
+///
+/// The two sessions are kept separate on purpose: a measurement query can time
+/// out while the instrument still answers late (e.g. an unavailable reading is
+/// sent after the read deadline). That stale reply stays buffered on the socket
+/// and the next read returns it, so reusing one connection for the binary image
+/// read writes a measurement value (a few text bytes) as the PNG — the
+/// "empty black snapshot" bug.
 ///
 /// Each pair is named `<instrument>-<timestamp>.<ext>` and
 /// `<instrument>-<timestamp>.csv`, so a multi-device run keeps every reading
@@ -955,7 +961,14 @@ fn capture_workspace_snapshots(workspace: &Workspace, dir: &Path) {
         };
 
         let measurements = measure::collect_measurements(transport.as_mut(), &idn);
-        let shot = match screenshot::capture(transport.as_mut(), &idn, None) {
+
+        // Close the measurement session before reading the image. Dropping the
+        // transport also discards any late measurement reply still buffered on
+        // the socket, which would otherwise be mistaken for the image block.
+        drop(transport);
+
+        let shot = match screenshot::capture_from_address(instrument.device.address, timeout, None)
+        {
             Ok(shot) => shot,
             Err(err) => {
                 eprintln!("snapshot: {}: {err}", instrument.label());

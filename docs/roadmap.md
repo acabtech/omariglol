@@ -7,19 +7,21 @@ Python scripting plus Omarchy integration.
 
 ### `omariglol-core`
 
-- [ ] `transport::rpc` — XDR codec, ONC RPC `CALL`/`REPLY`, record marking
-- [ ] `transport::rpc` — portmapper `GETPORT` (TCP and UDP) and `DUMP`
-- [ ] `transport::vxi11` — `create_link`, `device_write`, `device_read`,
+- [x] `transport::rpc` — XDR codec, ONC RPC `CALL`/`REPLY`, record marking
+- [x] `transport::rpc` — portmapper `GETPORT` (TCP and UDP) and `DUMP`
+- [x] `transport::vxi11` — `create_link`, `device_write`, `device_read`,
       `destroy_link`
-- [ ] `transport::vxi11` — `device_readstb`, `device_trigger`, `device_clear`,
+- [x] `transport::vxi11` — `device_readstb`, `device_trigger`, `device_clear`,
       `device_lock`, `device_remote`/`local`
-- [ ] `transport::raw` — TCP 5025 with newline framing and partial-read handling
-- [ ] `discovery` — VXI-11 broadcast `PMAP_DUMP`, merged with mDNS results
-- [ ] `discovery` — mDNS/DNS-SD browse of `_lxi`, `_scpi-raw`, `_vxi-11`
-- [ ] `screenshot` — IEEE-488.2 definite- and indefinite-length block parsing
-- [ ] `screenshot` — profiles for Rigol DS1000Z/DS2000/DS4000, Keysight
+- [x] `transport::raw` — TCP 5025 with newline framing and partial-read handling
+- [x] `discovery` — VXI-11 broadcast `PMAP_DUMP`, merged with mDNS results
+- [x] `discovery` — mDNS/DNS-SD browse of `_lxi`, `_scpi-raw`, `_vxi-11`
+- [x] `discovery` — parallel subnet scan with direct SCPI `*IDN?` probes
+- [x] `discovery_engine` — TTL cache with incremental rescans
+- [x] `screenshot` — IEEE-488.2 definite- and indefinite-length block parsing
+- [x] `screenshot` — profiles for Rigol DS1000Z/DS2000/DS4000, Keysight
       InfiniiVision, Rohde & Schwarz
-- [ ] `benchmark` — round-trip statistics with percentiles
+- [x] `benchmark` — round-trip statistics with percentiles
 
 ### `omariglol-script`
 
@@ -27,41 +29,54 @@ Python scripting plus Omarchy integration.
 - [x] Expose `omariglol.connect()` returning an instrument object with
       `write`, `query`, `query_raw`, `idn`, `timeout`
 - [x] Stream `print()` output and progress back to the caller
-- [x] CSV logging helper
+- [x] CSV logging helper (`CsvLogger`)
+- [x] Progress helpers (`sample`, `status`, `checkpoint`, `working_dir`)
 - [x] Cancel a running script
+- [x] Multi-instrument `Workspace` API with batch queries, presets and runs
 
 ### CLI
 
-- [ ] `discover` with `--mdns`, `--timeout`, `--json`
-- [ ] `scpi` with `--raw`, `--port`, `--hex`, and an interactive mode
-- [ ] `screenshot` with `--raw`, `--command` override
-- [ ] `benchmark` with `--count`, `--command`, `--json`
+- [x] `discover` with `--mdns`, `--timeout`, `--json`, `--add`
+- [x] `scpi` with `--raw`, `--port`, `--hex`, and an interactive mode
+- [x] `screenshot` with `--raw`, `--vxi11`, `--command` override
+- [x] `benchmark` with `--count`, `--command`, `--json`
 - [x] `run` for Python scripts
+- [x] `driver`, `workspace`, `measure` and `autoscale`
 
 ### Desktop app
 
-- [ ] Tauri commands for every core operation, progress via events
-- [ ] Search / SCPI / Screenshot / Benchmark / Script modes
-- [ ] Omarchy palette resolution with the documented fallback chain
-- [ ] Persist last-used instrument and window geometry
+- [x] Tauri commands for every core operation, progress via events
+- [x] Workspace, Discovery, Instrument, SCPI Console, Screenshot, Benchmark,
+      Timeline and Script panels
+- [x] Omarchy palette resolution with the documented fallback chain
+- [x] Persist workspaces, the active instrument and window geometry
 
 ### Omarchy
 
-- [ ] `omarchy/themed/omariglol-theme.toml.tpl` template
-- [ ] `tech.alatcerdas.omariglol` bar-widget plugin + panel
-- [ ] Installer script that copies the template and registers the plugin
+- [x] `omarchy/themed/omariglol-theme.toml.tpl` template
+- [x] `tech.alatcerdas.omariglol` bar-widget plugin + panel
+- [x] Installer script that copies the template and registers the plugin
+
+### Multi-instrument platform
+
+- [x] Workspaces holding instruments, presets, rules and triggers
+- [x] Shared timeline across instruments
+- [x] Driver command surface derived from `*IDN?`
+- [x] Parallel workspace measurement and autoscale
+- [x] Snapshot capture (PNG + measurement CSV) after measure and script runs
 
 ## 0.2.0 — scripting depth
 
-- [ ] Live charts in the Script mode (line, scatter, gauge)
-- [ ] Multi-instrument scripts
+- [x] Live charts in the Script mode (line, scatter, gauge)
+- [x] Multi-instrument scripts
+- [x] CSV logging
 - [ ] Script library with saved snippets
 - [ ] Headless daemon mode so scripts can share one instrument connection
 
 ## Later
 
-- [ ] Instrument profile database (beyond screenshots)
+- [ ] Instrument profile database beyond the current driver table
 - [ ] Screenshot diffing for regression runs
-- [ ] Data export (CSV, HDF5)
+- [ ] HDF5 data export (CSV already lands through `CsvLogger`)
 - [ ] LXI event / `*SRQ` subscription
 - [ ] HiSLIP transport

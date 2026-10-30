@@ -2,7 +2,7 @@
 
 **A native-to-Omarchy reimplementation of [lxi-tools](https://github.com/lxi-tools/lxi-tools).**
 
-`omariglol` talks to LXI / SCPI test instruments oscilloscopes, power supplies,
+`omariglol` talks to LXI / SCPI test instruments — oscilloscopes, power supplies,
 signal generators, DMMs — over VXI-11 and raw TCP, and presents them through a
 CLI, a themed desktop app, and the Omarchy shell itself.
 
@@ -59,22 +59,34 @@ Three frontends over one protocol core:
 
 Full detail in [`docs/architecture.md`](docs/architecture.md).
 
-## Planned feature set (0.1.0)
+## Feature set (0.1.2)
 
-Mirrors `lxi-tools`, with Python in place of Lua:
+The CLI mirrors `lxi-tools`, with Python in place of Lua:
 
 | Command | Status | Notes |
 | --- | --- | --- |
-| `omariglol discover` | stub | VXI-11 broadcast + mDNS/DNS-SD |
-| `omariglol scpi` | stub | VXI-11 or `--raw`, hex output, interactive mode |
-| `omariglol screenshot` | stub | IEEE-488.2 block capture, per-vendor profiles |
-| `omariglol benchmark` | stub | SCPI round-trip statistics |
-| `omariglol run` | stub | Execute a Python measurement script |
-| GUI: Search | stub | Instrument browser |
-| GUI: SCPI | stub | Command console |
-| GUI: Screenshot | stub | Live instrument display |
-| GUI: Benchmark | stub | Throughput measurement |
-| GUI: Script | stub | Editor + live charts |
+| `riglol discover` | implemented | VXI-11 broadcast, mDNS/DNS-SD, subnet scan, TTL cache, `--json`, `--add` |
+| `riglol scpi` | implemented | VXI-11 or `--raw`, hex output, interactive mode |
+| `riglol screenshot` | implemented | IEEE-488.2 block capture, per-vendor profiles, `--command` override |
+| `riglol benchmark` | implemented | SCPI round-trip statistics, `--json` |
+| `riglol run` | implemented | Execute a Python measurement script |
+| `riglol driver` | implemented | Show the named command surface for an instrument |
+| `riglol workspace` | implemented | List, create and inspect saved workspaces |
+| `riglol measure` | implemented | Measure every instrument in a workspace in parallel |
+| `riglol autoscale` | implemented | Autoscale every capable instrument in a workspace |
+
+The desktop app is a workspace-aware workbench with these panels:
+
+| Panel | Status | Notes |
+| --- | --- | --- |
+| Workspace | implemented | Workspace list, instruments, presets and automation state |
+| Discovery | implemented | Live multi-strategy discovery with a TTL cache |
+| Instrument | implemented | Connection management and driver controls |
+| SCPI Console | implemented | Per-instrument command console |
+| Screenshot | implemented | Live instrument display |
+| Benchmark | implemented | Throughput measurement with live samples |
+| Timeline | implemented | Shared event log across instruments |
+| Script | implemented | Python editor, streaming console and live charts |
 
 ## Omarchy integration
 
@@ -108,9 +120,12 @@ npm run tauri dev
 
 ## Roadmap
 
-- **0.1.0** — the feature set above.
-- **0.2.0** — scripting depth: live charts, CSV logging, multi-instrument scripts.
-- **Later** — instrument profiles, screenshot diffing, headless daemon mode.
+- **0.1.x** — the feature set above; the current release is 0.1.2.
+- **0.2.0** — scripting depth: a saved snippet library and a headless daemon so
+  scripts can share one instrument connection. Live charts, CSV logging and
+  multi-instrument workspace scripts have already landed.
+- **Later** — a broader instrument profile database, screenshot diffing, LXI
+  event/`*SRQ` subscription and HiSLIP.
 
 ## License
 

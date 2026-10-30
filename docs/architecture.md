@@ -9,7 +9,8 @@
    `spawn_blocking`, a CLI main). An async runtime in the core would add
    complexity for no throughput.
 3. **No UI framework in the protocol layer.** `omariglol-core` depends on
-   `serde`, `thiserror`, `socket2`, `rand` and `base64`. Nothing else.
+   `serde`, `serde_json`, `thiserror`, `socket2`, `rand` and `base64`. Nothing
+   else.
 4. **Theme-agnostic UI.** The frontend never names a colour.
 
 ## Crates
@@ -26,7 +27,17 @@ The whole instrument-facing surface. Module map:
 | `transport::vxi11` | VXI-11 `device_core` channel: `create_link`, `device_write`, `device_read`, … |
 | `transport::raw` | LXI raw socket on TCP 5025 |
 | `transport` | `ScpiTransport` trait and the `Session` convenience wrapper |
-| `discovery` | VXI-11 broadcast and mDNS/DNS-SD browsing |
+| `connection` | A live connection with health and statistics tracking |
+| `instrument` | `Instrument`, `InstrumentId`, `InstrumentState` and configuration |
+| `workspace` | `Workspace`, `WorkspaceManager` and JSON persistence |
+| `preset` / `rule` / `trigger` | Batch presets, conditional routing and the trigger graph |
+| `timeline` | The shared, timestamped event log |
+| `driver` | `InstrumentDriver` — a named command surface derived from `*IDN?` |
+| `measure` | Parallel measurement fan-out across a workspace |
+| `autoscale` | Parallel autoscale across instruments that support it |
+| `netconfig` | Local interface, subnet, gateway and VLAN detection |
+| `discovery` | VXI-11 broadcast, mDNS/DNS-SD and direct SCPI probes |
+| `discovery_engine` | Cached multi-strategy discovery with TTL and incremental rescans |
 | `screenshot` | IEEE-488.2 block parsing, per-vendor capture profiles |
 | `benchmark` | SCPI round-trip statistics |
 
@@ -44,7 +55,7 @@ marking, `AUTH_NULL` credentials, and two portmapper calls — because:
 
 #### Discovery
 
-Two mechanisms, deliberately independent:
+Three mechanisms, deliberately independent:
 
 - **VXI-11 broadcast.** A `PMAP_DUMP` RPC call sent to the broadcast address on
   port 111. Hosts that answer *and* have program `0x0607AF` (VXI-11
@@ -53,10 +64,15 @@ Two mechanisms, deliberately independent:
 - **mDNS / DNS-SD.** Browse `_lxi._tcp.local`, `_scpi-raw._tcp.local` and
   `_vxi-11._tcp.local` on `224.0.0.251`. Finds instruments that advertise
   themselves and can cross a routed boundary.
+- **Subnet scan.** Direct SCPI `*IDN?` probes over TCP (port 5025, Rigol's 5555
+  and the other known vendor ports) against the local subnet and any extra
+  hosts, run in parallel with a bounded timeout.
 
-Results from both are merged by IP address, preferring the record with more
+Results from all three are merged by IP address, preferring the record with more
 information, so an mDNS hit supplies a friendly name for a device that the
-broadcast only found as a bare IP.
+broadcast only found as a bare IP. The `discovery_engine` wraps the strategies
+in a TTL cache and can rescan incrementally, skipping hosts whose entry is still
+fresh.
 
 ### `omariglol-script`
 
@@ -83,16 +99,23 @@ with connect("192.168.1.50") as inst:
 A `clap`-derived binary. Subcommands mirror `lxi` so muscle memory transfers:
 
 ```
-omariglol discover [--mdns] [--timeout N]
-omariglol scpi [--raw] [--port N] <address> [command...]
-omariglol screenshot [--raw] <address> <file>
-omariglol benchmark [--count N] [--command CMD] <address>
-omariglol run <script.py> [args...]
+riglol discover [--mdns] [--timeout N] [--json] [--add]
+riglol scpi [--raw] [--port N] [--hex] <address> [command...]
+riglol screenshot [--raw|--vxi11] [--command CMD] <address> <file>
+riglol benchmark [--count N] [--command CMD] [--json] <address>
+riglol run <script.py> [args...]
+riglol driver [--raw] [--json] <address>
+riglol workspace list|create|show
+riglol measure [--workspace NAME] [--command CMD] [--json]
+riglol autoscale [--workspace NAME] [--json]
 ```
 
 ## Desktop app
 
-`src-tauri` is the backend, `src/` is the frontend.
+`src-tauri` is the backend, `src/` is the frontend. State is organised around the
+workspace model: a `WorkspaceManager` owns the set of workspaces and the active
+one, and a map of live connections holds one transport session per connected
+instrument. Workspaces persist to `~/.config/omariglol/workspaces`.
 
 ```
 src-tauri/src/
@@ -113,18 +136,28 @@ React 19 + TypeScript + Vite, matching the house style of `acabtech/NuxSSHTerm`.
 ```
 src/
 ├── main.tsx            bootstrap
-├── App.tsx             shell layout + mode switching
+├── App.tsx             shell layout and scroll-spy navigation
 ├── styles.css          all styling, driven by CSS custom properties
-├── theme/omarchy.ts    resolves the live Omarchy palette into CSS variables
+├── theme/omarchy.ts    applies the resolved palette as CSS custom properties
+├── state/workspace.tsx workspace context: instruments, timeline, events
+├── hooks/              keyboard shortcuts, scroll spy, window geometry
 ├── lib/api.ts          typed wrappers over the Tauri IPC commands
 ├── lib/types.ts        types mirroring the Rust structs
-└── modes/              one component per GUI mode
+├── components/         shared UI (Sidebar, Console, Chart, Timeline/Topology)
+└── sections/           one component per workbench panel
 ```
+
+The workbench panels are Workspace, Discovery, Instrument, SCPI Console,
+Screenshot, Benchmark, Timeline and Script. They are scrolled in one pane rather
+than switched as tabs, so a running benchmark or script stays visible while you
+work elsewhere.
 
 ### Theming contract
 
 Every colour in the UI comes from a CSS custom property defined on `:root`
-(`--om-bg`, `--om-fg`, `--om-accent`, `--om-red`, …). `theme/omarchy.ts` is the
-only module that knows where those values come from. Swapping the theme engine
-means editing one file. Details in
+(`--om-bg`, `--om-fg`, `--om-accent`, `--om-red`, …). The Rust bridge
+(`src-tauri/src/theme.rs`) resolves the live Omarchy palette following the
+documented fallback chain, and `theme/omarchy.ts` is the only frontend module
+that turns it into CSS custom properties. Swapping the theme engine means
+editing those two files at most. Details in
 [`omarchy-integration.md`](omarchy-integration.md).

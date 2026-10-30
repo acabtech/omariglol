@@ -1,9 +1,9 @@
 <div class="hero">
 <h1>omariglol</h1>
 <p class="tagline">LXI / SCPI instrument control, native to Omarchy.</p>
-<p class="lede">A native reimplementation of <a href="https://github.com/lxi-tools/lxi-tools">lxi-tools</a>: talk to oscilloscopes, power supplies, signal generators and DMMs over VXI-11 and raw TCP — from a CLI, a themed desktop app, and the Omarchy shell itself.</p>
+<p class="lede">A native reimplementation of <a href="https://github.com/lxi-tools/lxi-tools">lxi-tools</a>: talk to oscilloscopes, power supplies, signal generators and DMMs over VXI-11 and raw TCP — from a CLI, a themed desktop app, and the Omarchy shell itself. Organise them into workspaces and measure the whole rack at once.</p>
 <div class="badges">
-<span class="badge ok">v0.1.0</span>
+<span class="badge ok">v0.1.2</span>
 <span class="badge">Omarchy 4.x</span>
 <span class="badge">Rust + Tauri</span>
 <span class="badge">Python scripting</span>
@@ -22,7 +22,9 @@
 
 `omariglol` talks to LXI / SCPI test instruments — oscilloscopes, power supplies,
 signal generators, DMMs — over VXI-11 and raw TCP, and presents them through a
-CLI, a themed desktop app, and the Omarchy shell itself.
+CLI, a themed desktop app, and the Omarchy shell itself. Instruments live in
+named workspaces, with presets, routing rules, triggers and a shared timeline,
+so a rack is treated as one thing rather than a list of sockets.
 
 The name is a portmanteau of *Omarchy* and *RigLOL*, but it is vendor-neutral:
 anything that speaks SCPI is fair game.
@@ -45,8 +47,10 @@ it. Three things motivated a reimplementation:
 
 <div class="grid">
 <div class="card"><span class="ico">🔌</span><h3>VXI-11 and raw TCP</h3><p>A hand-written ONC RPC stack drives VXI-11, with a raw socket transport on TCP 5025 for instruments that prefer it.</p></div>
-<div class="card"><span class="ico">🔎</span><h3>Discovery</h3><p>VXI-11 broadcast and mDNS/DNS-SD browsing, merged by address so a friendly name from mDNS enriches a bare IP from the broadcast.</p></div>
-<div class="card"><span class="ico">🐍</span><h3>Python scripting</h3><p>An embedded CPython engine exposes a small instrument API — <code>connect()</code>, <code>write</code>, <code>query</code>, <code>idn</code> — with <code>numpy</code> and <code>matplotlib</code> for free.</p></div>
+<div class="card"><span class="ico">🔎</span><h3>Discovery</h3><p>VXI-11 broadcast, mDNS/DNS-SD and a parallel subnet scan, merged by address and cached with a TTL so rescans only probe what changed.</p></div>
+<div class="card"><span class="ico">🗂️</span><h3>Workspaces</h3><p>Named workspaces hold instruments, presets, rules, triggers and a shared event timeline, persisted as JSON and shared by the CLI, app and shell plugin.</p></div>
+<div class="card"><span class="ico">🎛️</span><h3>Measure the rack</h3><p>Measure or autoscale every instrument in a workspace in parallel, with per-type defaults, a command override and a snapshot of each screen and reading.</p></div>
+<div class="card"><span class="ico">🐍</span><h3>Python scripting</h3><p>An embedded CPython engine exposes <code>connect()</code> and a multi-instrument <code>Workspace</code> API, with CSV logging, live chart samples and <code>numpy</code>/<code>matplotlib</code> for free.</p></div>
 <div class="card"><span class="ico">🖼️</span><h3>Screenshots</h3><p>IEEE-488.2 block capture with per-vendor profiles for Rigol, Keysight and Rohde & Schwarz instruments.</p></div>
 <div class="card"><span class="ico">🎨</span><h3>Native to Omarchy</h3><p>A Quickshell bar widget plus a theme template, so the app follows every theme switch — including themes that did not exist when this was written.</p></div>
 <div class="card"><span class="ico">🧩</span><h3>One protocol core</h3><p>The CLI, the desktop app and the shell plugin all sit on <code>omariglol-core</code>. No frontend grows its own SCPI handling.</p></div>
@@ -54,7 +58,13 @@ it. Three things motivated a reimplementation:
 
 ## Install
 
-Build the workspace and publish the CLI to `bin/`:
+Install the CLI, theme template, configuration and shell plugin in one step:
+
+```sh
+scripts/install.sh
+```
+
+Or build the workspace and publish the CLI to `bin/` yourself:
 
 ```sh
 make                 # builds bin/riglol
@@ -67,9 +77,8 @@ npm install
 npm run tauri build
 ```
 
-Full setup, including the Omarchy theme template and shell plugin, is in
-[Overview](docs/overview.html) and
-[Omarchy integration](docs/omarchy-integration.html).
+Full setup is in [Overview](docs/overview.html); theming and the shell plugin
+are in [Omarchy integration](docs/omarchy-integration.html).
 
 ## Requirements
 

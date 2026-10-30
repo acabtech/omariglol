@@ -21,10 +21,13 @@ GTK 3) and, for the scripting crate, CPython development headers.
 ```
 crates/omariglol-core/   Protocol core — no UI, no CLI, no Python
 crates/omariglol-script/ Embedded CPython scripting engine
-crates/omariglol-cli/    The `omariglol` binary
+crates/omariglol-cli/    The `riglol` binary
 src-tauri/               Tauri 2 backend (desktop app)
 src/                     React + TypeScript frontend
 omarchy/                 Omarchy shell plugin and theme template
+scripts/                 install.sh, uninstall.sh, doctor.sh and helpers
+site/                    Static documentation site generator and landing page
+examples/                Python and shell examples
 docs/                    Architecture and integration notes
 ```
 
@@ -63,7 +66,10 @@ npm run build          # type-check + bundle the frontend
 
 ## Adding an instrument profile
 
-Screenshot capture is vendor-specific. Profiles live in
+Screenshot capture is vendor-specific. Screenshot profiles live in
 `crates/omariglol-core/src/screenshot.rs` as a table of `*IDN?` prefixes mapped
-to setup commands and a capture query. Add a profile, add a test asserting the
-prefix matches, and include a captured sample if you can.
+to setup commands and a capture query. The named command surface shown in the
+app and exposed by `riglol driver` lives in `crates/omariglol-core/src/driver.rs`
+and currently carries a rich profile for the Rigol DS1000Z family on top of a
+generic per-type command set. Add a profile, add a test asserting the prefix
+matches, and include a captured sample if you can.

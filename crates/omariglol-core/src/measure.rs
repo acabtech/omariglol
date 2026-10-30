@@ -16,9 +16,9 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 
 use crate::device::Target;
-use crate::driver::{InstrumentType, classify_idn, measure_all_commands};
+use crate::driver::{InstrumentDriver, InstrumentType, classify_idn};
 use crate::instrument::Instrument;
-use crate::transport::Session;
+use crate::transport::{ScpiTransport, Session};
 use crate::workspace::Workspace;
 
 /// The default measurement query for an instrument type.
@@ -38,6 +38,77 @@ pub fn default_measurement(instrument_type: InstrumentType) -> Option<&'static s
         | InstrumentType::SwitchModule
         | InstrumentType::Unknown => None,
     }
+}
+
+/// A measurement read from an instrument while taking a snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DetectedMeasurement {
+    /// The driver operation name, e.g. `measure_vpp`.
+    pub name: String,
+    /// The SCPI mnemonic shown as the CSV column, e.g. `VPP`.
+    pub abbreviation: String,
+    /// The instrument's response.
+    pub value: String,
+}
+
+/// The measurement queries a driver exposes, as `(name, abbreviation, scpi)`.
+///
+/// Only queries in the driver's `measure` group are considered, so acquisition
+/// and display commands are never mistaken for readings.
+pub fn measurement_queries(idn: &str) -> Vec<(String, String, String)> {
+    InstrumentDriver::from_idn(idn)
+        .commands
+        .into_iter()
+        .filter(|command| command.group == "measure" && command.query)
+        .map(|command| {
+            let abbreviation = command
+                .scpi
+                .trim()
+                .trim_end_matches('?')
+                .rsplit(':')
+                .next()
+                .unwrap_or(command.scpi.as_str())
+                .to_string();
+            (command.name, abbreviation, command.scpi)
+        })
+        .collect()
+}
+
+/// True when a response is a usable reading rather than a placeholder.
+///
+/// Rigol instruments answer an unavailable measurement with `9.9E37`; that
+/// sentinel, empty replies and non-numeric text are all skipped.
+fn is_usable_measurement(value: &str) -> bool {
+    match value.trim().parse::<f64>() {
+        Ok(number) => number.is_finite() && number.abs() < 9.0e37,
+        Err(_) => false,
+    }
+}
+
+/// Query every measurement an instrument's driver exposes.
+///
+/// Errors and placeholder answers are omitted, so the result is only what the
+/// instrument actually detected. The caller is responsible for having already
+/// identified the instrument (`idn`).
+pub fn collect_measurements(
+    transport: &mut dyn ScpiTransport,
+    idn: &str,
+) -> Vec<DetectedMeasurement> {
+    let mut detected = Vec::new();
+    for (name, abbreviation, scpi) in measurement_queries(idn) {
+        let Ok(raw) = transport.query(&scpi) else {
+            continue;
+        };
+        let value = String::from_utf8_lossy(&raw).trim().to_string();
+        if is_usable_measurement(&value) {
+            detected.push(DetectedMeasurement {
+                name,
+                abbreviation,
+                value,
+            });
+        }
+    }
+    detected
 }
 
 /// One instrument's measurement outcome.
@@ -157,13 +228,6 @@ fn measure_one(instrument: &Instrument, command_override: Option<&str>) -> Measu
     };
     let instrument_type = classify_idn(&idn);
 
-    // Best-effort: ask the instrument to show all measurements before the
-    // snapshot is taken, so the screenshot is more useful. An instrument
-    // without such a mode rejects the write; that is not a measurement failure.
-    for setup in measure_all_commands(&idn) {
-        let _ = session.send(setup);
-    }
-
     let default = default_measurement(instrument_type);
     let command = command_override
         .map(str::to_string)
@@ -261,6 +325,29 @@ mod tests {
         assert_eq!(default_measurement(InstrumentType::PowerSupply), None);
         assert_eq!(default_measurement(InstrumentType::SignalGenerator), None);
         assert_eq!(default_measurement(InstrumentType::Unknown), None);
+    }
+
+    #[test]
+    fn test_measurement_queries_use_scpi_mnemonics() {
+        let queries = measurement_queries("RIGOL TECHNOLOGIES,DS1054Z,SN,1.0");
+        assert!(
+            queries
+                .iter()
+                .any(|(_, abbreviation, scpi)| abbreviation == "VPP" && scpi == ":MEAS:VPP?")
+        );
+        // Writes and non-measurement commands are excluded.
+        assert!(!queries.iter().any(|(name, ..)| name == "measure_clear"));
+        assert!(!queries.iter().any(|(name, ..)| name == "run"));
+    }
+
+    #[test]
+    fn test_is_usable_measurement_rejects_placeholders() {
+        assert!(is_usable_measurement("1.000E+03"));
+        assert!(is_usable_measurement("-0.5"));
+        // Rigol's "no measurement" sentinel.
+        assert!(!is_usable_measurement("9.9E37"));
+        assert!(!is_usable_measurement(""));
+        assert!(!is_usable_measurement("****"));
     }
 
     #[test]

@@ -881,15 +881,49 @@ fn safe_component(input: &str) -> String {
     }
 }
 
-/// Capture and save a screenshot of every instrument in the workspace.
+/// Escape a value for a CSV cell.
+fn csv_escape(value: &str) -> String {
+    if value.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_string()
+    }
+}
+
+/// Write detected measurements as a one-row CSV, with the timestamp as the
+/// first column and each measurement mnemonic as a column name.
+fn write_measurement_csv(
+    path: &Path,
+    timestamp: &str,
+    measurements: &[measure::DetectedMeasurement],
+) -> std::io::Result<()> {
+    let mut out = String::from("timestamp");
+    for measurement in measurements {
+        out.push(',');
+        out.push_str(&csv_escape(&measurement.abbreviation));
+    }
+    out.push('\n');
+    out.push_str(timestamp);
+    for measurement in measurements {
+        out.push(',');
+        out.push_str(&csv_escape(&measurement.value));
+    }
+    out.push('\n');
+    std::fs::write(path, out)
+}
+
+/// Capture a screenshot and a measurement CSV for every workspace instrument.
 ///
-/// Capture goes through [`screenshot::capture_from_address`], which probes the
-/// vendor raw SCPI ports before falling back to VXI-11 — raw TCP is the fastest
-/// way to pull the image. Failures are reported on stderr and never abort the
-/// loop, so one silent instrument cannot stop the others.
+/// The transport is opened through [`screenshot::open_default_transport`],
+/// which probes the vendor raw SCPI ports before falling back to VXI-11 — raw
+/// TCP is the fastest way to pull the image. Measurements are collected on the
+/// same connection before the capture, since the Rigol family has no
+/// "measure all" mode to enable on the device.
 ///
-/// Every file is named `<instrument>-<timestamp>.<ext>`, so a multi-device run
-/// keeps each reading distinguishable within the shared folder.
+/// Each pair is named `<instrument>-<timestamp>.<ext>` and
+/// `<instrument>-<timestamp>.csv`, so a multi-device run keeps every reading
+/// distinguishable within the shared folder. Failures are reported on stderr
+/// and never abort the loop.
 fn capture_workspace_snapshots(workspace: &Workspace, dir: &Path) {
     if workspace.instruments.is_empty() {
         return;
@@ -900,24 +934,52 @@ fn capture_workspace_snapshots(workspace: &Workspace, dir: &Path) {
     }
 
     for instrument in &workspace.instruments {
-        match screenshot::capture_from_address(
-            instrument.device.address,
-            instrument.config.timeout(),
-            None,
-        ) {
-            Ok(shot) => {
-                let path = dir.join(format!(
-                    "{}-{}.{}",
-                    safe_component(&instrument.label()),
-                    snapshot_file_timestamp(),
-                    shot.format.extension()
-                ));
-                match std::fs::write(&path, &shot.data) {
-                    Ok(()) => eprintln!("snapshot: wrote {}", path.display()),
-                    Err(err) => eprintln!("snapshot: {}: {err}", path.display()),
+        let label = safe_component(&instrument.label());
+        let timeout = instrument.config.timeout();
+
+        let mut transport =
+            match screenshot::open_default_transport(instrument.device.address, timeout) {
+                Ok(transport) => transport,
+                Err(err) => {
+                    eprintln!("snapshot: {}: {err}", instrument.label());
+                    continue;
                 }
+            };
+
+        let idn = match transport.query("*IDN?") {
+            Ok(raw) => String::from_utf8_lossy(&raw).trim().to_string(),
+            Err(err) => {
+                eprintln!("snapshot: {}: {err}", instrument.label());
+                continue;
             }
-            Err(err) => eprintln!("snapshot: {}: {err}", instrument.label()),
+        };
+
+        let measurements = measure::collect_measurements(transport.as_mut(), &idn);
+        let shot = match screenshot::capture(transport.as_mut(), &idn, None) {
+            Ok(shot) => shot,
+            Err(err) => {
+                eprintln!("snapshot: {}: {err}", instrument.label());
+                continue;
+            }
+        };
+
+        let timestamp = snapshot_file_timestamp();
+        let stem = format!("{label}-{timestamp}");
+
+        let image_path = dir.join(format!("{stem}.{}", shot.format.extension()));
+        match std::fs::write(&image_path, &shot.data) {
+            Ok(()) => eprintln!("snapshot: wrote {}", image_path.display()),
+            Err(err) => eprintln!("snapshot: {}: {err}", image_path.display()),
+        }
+
+        let csv_path = dir.join(format!("{stem}.csv"));
+        match write_measurement_csv(&csv_path, &timestamp, &measurements) {
+            Ok(()) => eprintln!(
+                "snapshot: wrote {} ({} measurement(s))",
+                csv_path.display(),
+                measurements.len()
+            ),
+            Err(err) => eprintln!("snapshot: {}: {err}", csv_path.display()),
         }
     }
 }

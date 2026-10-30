@@ -124,33 +124,6 @@ pub fn classify_idn(idn: &str) -> InstrumentType {
     }
 }
 
-/// SCPI writes that put an instrument into "measure all" display mode.
-///
-/// Only vendors known to expose such a mode are listed. Callers must treat
-/// failures as non-fatal: an instrument that does not implement the write
-/// rejects it, and the measurement itself still proceeds.
-pub fn measure_all_commands(idn: &str) -> &'static [&'static str] {
-    let upper = idn.trim().to_ascii_uppercase();
-    if DS1000Z_PREFIXES
-        .iter()
-        .any(|prefix| upper.starts_with(prefix))
-        || upper.starts_with("RIGOL TECHNOLOGIES,DS2")
-        || upper.starts_with("RIGOL TECHNOLOGIES,DS4")
-        || upper.starts_with("RIGOL TECHNOLOGIES,MSO2")
-        || upper.starts_with("RIGOL TECHNOLOGIES,MSO4")
-    {
-        &[":MEAS:STAT:ENAB ON"]
-    } else if upper.starts_with("KEYSIGHT TECHNOLOGIES,DSO")
-        || upper.starts_with("KEYSIGHT TECHNOLOGIES,MSO")
-        || upper.starts_with("AGILENT TECHNOLOGIES,DSO")
-        || upper.starts_with("AGILENT TECHNOLOGIES,MSO")
-    {
-        &[":MEAS:STAT ON"]
-    } else {
-        &[]
-    }
-}
-
 /// Extract the model field (the second comma-separated field) from an IDN.
 fn idn_model(upper: &str) -> String {
     upper
@@ -291,8 +264,6 @@ fn generic_commands(instrument_type: InstrumentType) -> Vec<DriverCommand> {
                     .described("measure", "Measure frequency"),
                 DriverCommand::new("measure_vpp", ":MEAS:VPP?", true)
                     .described("measure", "Measure peak-to-peak"),
-                DriverCommand::new("enable_measure_all", ":MEAS:STAT:ENAB ON", false)
-                    .described("measure", "Show all measurements on the display"),
                 DriverCommand::new("initiate", ":INIT", false).described("acquire", "Initiate"),
             ]);
         }
@@ -553,8 +524,6 @@ fn ds1000z_commands() -> Vec<DriverCommand> {
             .described("measure", "Measure preshoot"),
         DriverCommand::new("measure_clear", ":MEAS:CLE", false)
             .described("measure", "Clear all measurements"),
-        DriverCommand::new("enable_measure_all", ":MEAS:STAT:ENAB ON", false)
-            .described("measure", "Show all measurements on the display"),
     ]);
 
     // --- Waveform transfer ---------------------------------------------------
@@ -640,21 +609,6 @@ mod tests {
     fn test_classify_unknown() {
         assert_eq!(classify_idn("ACME,WIDGET,SN,1.0"), InstrumentType::Unknown);
         assert_eq!(classify_idn(""), InstrumentType::Unknown);
-    }
-
-    #[test]
-    fn test_measure_all_commands_by_vendor() {
-        assert_eq!(
-            measure_all_commands("RIGOL TECHNOLOGIES,DS1054Z,SN,1.0"),
-            &[":MEAS:STAT:ENAB ON"]
-        );
-        assert_eq!(
-            measure_all_commands("KEYSIGHT TECHNOLOGIES,DSOX1204G,SN,1.0"),
-            &[":MEAS:STAT ON"]
-        );
-        // Instruments without a known measure-all mode get no setup writes.
-        assert!(measure_all_commands("ACME,WIDGET,SN,1.0").is_empty());
-        assert!(measure_all_commands("").is_empty());
     }
 
     #[test]

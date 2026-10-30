@@ -22,6 +22,7 @@ use omariglol_core::discovery_engine::{
     CachedInstrument, DiscoveryEngine, DiscoveryEvent, DiscoveryOptions,
 };
 use omariglol_core::driver::InstrumentDriver;
+use omariglol_core::measure;
 use omariglol_core::netconfig;
 use omariglol_core::screenshot;
 use omariglol_core::transport::{self, Session, parse_address, to_hex};
@@ -88,6 +89,9 @@ pub enum Command {
 
     /// Manage saved workspaces.
     Workspace(WorkspaceArgs),
+
+    /// Measure every instrument in a workspace at once.
+    Measure(MeasureArgs),
 }
 
 #[derive(Debug, Args)]
@@ -144,6 +148,21 @@ pub struct DriverArgs {
     /// Socket timeout in seconds.
     #[arg(long, default_value_t = 3, value_name = "SECONDS")]
     pub timeout: u64,
+
+    /// Emit JSON instead of a table.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct MeasureArgs {
+    /// The workspace to measure (name or id). Defaults to the active one.
+    #[arg(long, value_name = "NAME")]
+    pub workspace: Option<String>,
+
+    /// Override the measurement query for every instrument.
+    #[arg(long, value_name = "COMMAND")]
+    pub command: Option<String>,
 
     /// Emit JSON instead of a table.
     #[arg(long)]
@@ -283,6 +302,7 @@ fn main() -> anyhow::Result<()> {
         Command::Run(args) => cmd_run(args),
         Command::Driver(args) => cmd_driver(args),
         Command::Workspace(args) => cmd_workspace(args),
+        Command::Measure(args) => cmd_measure(args),
     }
 }
 
@@ -798,4 +818,82 @@ fn cmd_workspace(args: WorkspaceArgs) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// measure
+// ---------------------------------------------------------------------------
+
+/// Measure every instrument in a workspace at once.
+///
+/// The fan-out lives in `omariglol-core` so the CLI, the desktop app and the
+/// Omarchy shell plugin share one implementation. See
+/// `plans/omarchy-integration.md` §3.
+fn cmd_measure(args: MeasureArgs) -> anyhow::Result<()> {
+    let dir = workspace_dir();
+    let mut manager = WorkspaceManager::with_dir(&dir);
+    manager.load_all()?;
+
+    let workspace = match &args.workspace {
+        Some(name) => manager
+            .list()
+            .iter()
+            .find(|workspace| &workspace.name == name || workspace.id.as_str() == name)
+            .ok_or_else(|| anyhow::anyhow!("no workspace '{name}' in {}", dir.display()))?,
+        None => manager.active().ok_or_else(|| {
+            anyhow::anyhow!(
+                "no workspace in {}; create one with `riglol workspace create <name>`",
+                dir.display()
+            )
+        })?,
+    };
+
+    if workspace.instruments.is_empty() {
+        anyhow::bail!("workspace '{}' has no instruments", workspace.name);
+    }
+
+    vlog!(
+        1,
+        "measuring {} instrument(s) in '{}'",
+        workspace.instruments.len(),
+        workspace.name
+    );
+    let report = measure::measure_workspace(workspace, args.command.as_deref());
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        print_measure_table(&report);
+    }
+    Ok(())
+}
+
+/// Render a measure report as a table plus a one-line summary.
+fn print_measure_table(report: &measure::MeasureReport) {
+    let rows: Vec<Vec<String>> = report
+        .results
+        .iter()
+        .map(|result| {
+            let value = match (&result.value, &result.error) {
+                (_, Some(error)) => format!("! {error}"),
+                (Some(value), None) => value.clone(),
+                (None, None) => "-".to_string(),
+            };
+            vec![
+                result.label.clone(),
+                result.instrument_type.label().to_string(),
+                result.command.clone(),
+                value,
+                format!("{:.1} ms", result.elapsed_ms),
+            ]
+        })
+        .collect();
+    print_table(&["INSTRUMENT", "TYPE", "COMMAND", "VALUE", "TIME"], &rows);
+    println!(
+        "\n{} measured, {} ok, {} failed in {:.0} ms",
+        report.measured(),
+        report.succeeded(),
+        report.failed(),
+        report.elapsed_ms
+    );
 }

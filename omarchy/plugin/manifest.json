@@ -2,18 +2,55 @@
   "schemaVersion": 1,
   "id": "acabtech.omariglol",
   "name": "omariglol",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "Sam Ralial",
   "license": "MIT",
-  "description": "Control an LXI / SCPI instrument from the Omarchy bar.",
+  "description": "Measure every instrument in the active workspace from the Omarchy bar.",
   "kinds": ["bar-widget"],
   "entryPoints": {
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
     "displayName": "omariglol",
+    "description": "Click: instrument panel. Middle click: measure all. Right click: refresh.",
     "category": "Hardware",
     "allowMultiple": true,
-    "defaultSection": "right"
+    "defaultSection": "right",
+    "defaults": {
+      "binary": "riglol",
+      "workspace": "",
+      "scriptPath": "",
+      "measureCommand": ""
+    },
+    "schema": [
+      {
+        "key": "binary",
+        "type": "string",
+        "label": "CLI binary",
+        "description": "The omariglol command-line binary to invoke. Defaults to `riglol`, the name the CLI crate builds.",
+        "defaultValue": "riglol"
+      },
+      {
+        "key": "workspace",
+        "type": "string",
+        "label": "Workspace (empty = active)",
+        "description": "The workspace to measure, by name or id. Leave empty to use the active workspace.",
+        "defaultValue": ""
+      },
+      {
+        "key": "scriptPath",
+        "type": "string",
+        "label": "Python script (optional)",
+        "description": "Absolute path to a Python script. When set, the trigger runs the script instead of measuring every instrument.",
+        "defaultValue": ""
+      },
+      {
+        "key": "measureCommand",
+        "type": "string",
+        "label": "Measurement query override",
+        "description": "A SCPI query to run on every instrument instead of the per-type default (scope :MEAS:FREQ?, DMM :MEAS:VOLT?, ...).",
+        "defaultValue": ""
+      }
+    ]
   }
 }

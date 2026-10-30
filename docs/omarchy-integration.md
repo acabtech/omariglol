@@ -100,8 +100,9 @@ is `acabtech.omariglol`.
 
 ### Ours
 
-`omarchy/plugin/` is a `bar-widget` plugin: a top-bar item showing the selected
-instrument, with a panel that fires a measurement and shows the result.
+`omarchy/plugin/` is a `bar-widget` plugin: a top-bar item showing how many
+instruments the last run measured, with a panel that lists the workspace's
+instruments and fires a simultaneous measurement of all of them.
 
 Install with:
 
@@ -111,8 +112,23 @@ omarchy plugin add /path/to/omariglol/omarchy/plugin --enable
 omarchy plugin add https://github.com/acabtech/omariglol.git --enable
 ```
 
-The plugin does **not** speak SCPI itself. It shells out to the `omariglol`
-binary, keeping the protocol in one place and the QML trivial.
+The panel has three things:
+
+1. a **trigger button** that measures every instrument in the active workspace
+   at once — unless a Python script is configured, in which case it runs the
+   script instead;
+2. the **instrument list**, with each instrument's last reading or error;
+3. a small **script button** indicating the loaded Python script (optional).
+
+The plugin does **not** speak SCPI itself. It shells out to the `riglol`
+binary, keeping the protocol in one place and the QML trivial. The trigger runs
+`riglol measure --json`, which loads the active workspace from
+`~/.config/omariglol/workspaces`, connects to every instrument, runs a per-type
+default measurement in parallel, and prints a JSON report. Each instrument is
+measured according to its `*IDN?` type: a scope answers `:MEAS:FREQ?`, a DMM
+`:MEAS:VOLT?`, a spectrum analyzer `:CALC:MARK:Y?`, and anything else is probed
+for liveness with `*IDN?`. Passing `--command` overrides the default for every
+instrument.
 
 ### Safety note
 

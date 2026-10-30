@@ -118,8 +118,11 @@ The panel has four things:
 1. a **trigger button** that measures every instrument in the active workspace
    at once — unless a Python script is configured, in which case it runs the
    script instead;
-2. a **Detect** button that runs `riglol discover --json --mdns` and lists the
-   instruments found, with their address and discovery method;
+2. a **Detect** button that runs `riglol discover --json --mdns --add` and
+   lists the instruments found, with their address and discovery method. The
+   `--add` flag persists them to the active workspace — or to the configured
+   `workspace`, which is passed through as `--workspace` — creating a `Default`
+   one when none exists, so the trigger's `riglol measure` actually sees them;
 3. the **workspace instrument list**, with each instrument's last reading or
    error;
 4. a clickable **script card**: `NO SCRIPT` opens a zenity file picker, a loaded

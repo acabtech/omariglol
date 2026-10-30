@@ -77,8 +77,9 @@ Omarchy plugins run unsandboxed inside the long-lived shell process.
   1. a **trigger button** that measures every instrument in the workspace at
      once — unless a Python script is configured, in which case it runs the
      script instead;
-  2. a **Detect** button that scans the network from the shell itself and lists
-     discovered instruments with their address and discovery method;
+  2. a **Detect** button that scans the network from the shell itself, lists
+     discovered instruments with their address and discovery method, and adds
+     them to the active workspace so the trigger can measure them;
   3. the **workspace instrument list**, with each instrument's last reading or
      error;
   4. a clickable **script card**: `NO SCRIPT` opens a file picker, a loaded
@@ -89,8 +90,11 @@ The trigger calls `riglol measure --json`, which loads the active workspace
 from `~/.config/omariglol/workspaces`, connects to every instrument, runs a
 per-type default measurement (scope `:MEAS:FREQ?`, DMM `:MEAS:VOLT?`, spectrum
 analyzer `:CALC:MARK:Y?`) in parallel, and prints a JSON report. **Detect**
-calls `riglol discover --json --mdns`, so discovery uses the same engine as the
-CLI and desktop app.
+calls `riglol discover --json --mdns --add`, so discovery uses the same engine
+as the CLI and desktop app and persists what it finds to the active workspace,
+or to the configured `workspace` setting, creating a `Default` one when none
+exists. That is what makes detect → measure work: the measurement fan-out only
+reads the workspace, never the discovery cache.
 
 ### Settings
 

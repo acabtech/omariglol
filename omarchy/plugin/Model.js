@@ -24,16 +24,25 @@ function measureCommand(binary, workspace, command) {
   return args;
 }
 
-/** The argv for a full discovery pass, including mDNS and the subnet scan. */
-function discoverCommand(binary) {
-  return [
+/**
+ * The argv for a full discovery pass, including mDNS and the subnet scan.
+ *
+ * `--add` persists what was found to the same workspace "measure all" reads.
+ * Without it, detection would list instruments the measurement fan-out never
+ * sees.
+ */
+function discoverCommand(binary, workspace) {
+  var args = [
     binary || "riglol",
     "discover",
     "--json",
     "--mdns",
     "--timeout",
     "3",
+    "--add",
   ];
+  if (workspace) args.push("--workspace", String(workspace));
+  return args;
 }
 
 /** The argv for the native folder picker (zenity ships with Omarchy). */

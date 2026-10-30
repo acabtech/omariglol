@@ -215,7 +215,7 @@ Panel {
 
   Process {
     id: discoveryProc
-    command: Model.discoverCommand(root.binary)
+    command: Model.discoverCommand(root.binary, root.workspace)
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {

@@ -129,6 +129,18 @@ pub struct DiscoverArgs {
     /// Probe every host, ignoring the cache.
     #[arg(long)]
     pub no_incremental: bool,
+
+    /// Add every discovered instrument to the active workspace.
+    ///
+    /// Creates a default workspace when there is no active one, so a fresh
+    /// install can detect then measure without a separate setup step.
+    #[arg(long)]
+    pub add: bool,
+
+    /// Add discovered instruments to this workspace (name or id) instead of
+    /// the active one. Only meaningful together with `--add`.
+    #[arg(long, value_name = "NAME", requires = "add")]
+    pub workspace: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -369,11 +381,71 @@ fn cmd_discover_scan(args: DiscoverArgs) -> anyhow::Result<()> {
         report.elapsed_ms
     );
 
+    if args.add {
+        add_discovered_to_workspace(&report.found, args.workspace.as_deref())?;
+    }
+
     if args.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
         print_cached_table(&report.found);
     }
+    Ok(())
+}
+
+/// Persist discovered instruments to a workspace.
+///
+/// The panel's "measure all" reads a workspace, not the discovery cache, so
+/// detected instruments have to be added before they can be measured. Adding
+/// is idempotent: [`Workspace::add_instrument`] keys on the instrument id, so
+/// re-detecting the same device leaves the workspace unchanged. `workspace`
+/// selects by name or id; when omitted the active workspace is used, and a
+/// `Default` one is created if the manager has none yet so the
+/// detect-then-measure flow works on a fresh install.
+fn add_discovered_to_workspace(
+    found: &[CachedInstrument],
+    workspace: Option<&str>,
+) -> anyhow::Result<()> {
+    if found.is_empty() {
+        return Ok(());
+    }
+
+    let dir = workspace_dir();
+    let mut manager = WorkspaceManager::with_dir(&dir);
+    manager.load_all()?;
+
+    let id = match workspace {
+        Some(name) => manager
+            .list()
+            .iter()
+            .find(|workspace| workspace.name == name || workspace.id.as_str() == name)
+            .map(|workspace| workspace.id.clone())
+            .ok_or_else(|| anyhow::anyhow!("no workspace '{name}' in {}", dir.display()))?,
+        None => {
+            if manager.active().is_none() {
+                manager.create("Default");
+            }
+            manager
+                .active_id()
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("no active workspace"))?
+        }
+    };
+
+    let (name, added) = {
+        let workspace = manager
+            .get_mut(&id)
+            .ok_or_else(|| anyhow::anyhow!("active workspace disappeared"))?;
+        let before = workspace.instruments.len();
+        for instrument in found {
+            workspace.add_instrument(instrument.device.clone());
+        }
+        (workspace.name.clone(), workspace.instruments.len() - before)
+    };
+    manager.save(&id)?;
+
+    // stderr, so `--json` still emits a single clean JSON document on stdout.
+    eprintln!("added {added} new instrument(s) to workspace '{name}'");
     Ok(())
 }
 

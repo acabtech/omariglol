@@ -8,20 +8,22 @@ import "Model.js" as Model
 
 // omariglol — the bar widget's panel.
 //
-// A small menu with three things:
-//   1. a trigger button that measures every instrument in the workspace at
-//      once — unless a Python script is configured, in which case it runs the
-//      script instead;
-//   2. the list of instruments, with each one's last reading or error;
-//   3. a small button indicating the loaded Python script (optional).
+// A compact instrument console:
+//   1. a trigger that measures every instrument in the workspace, or runs the
+//      loaded Python script;
+//   2. a Detect action that scans the network from the shell itself and lists
+//      what it finds, without involving the desktop app;
+//   3. the workspace instrument list, with each one's last reading or error;
+//   4. a clickable script card: NO SCRIPT opens a file picker, a loaded script
+//      runs, and CHANGE replaces it.
 //
-// The panel owns the data; BarWidget.qml reads it for the bar face. The only
-// side effect is a `Process` call to the `riglol` binary — no network code, no
-// dynamic evaluation (Omarchy plugins run unsandboxed).
+// The panel owns the data; BarWidget.qml reads it for the bar face. Side
+// effects stay limited to `Process` calls to the `riglol` binary and zenity —
+// no network code, no dynamic evaluation (Omarchy plugins run unsandboxed).
 Panel {
   id: root
-  moduleName: "acabtech.omariglol"
-  ipcTarget: "acabtech.omariglol"
+  moduleName: "tech.alatcerdas.omariglol"
+  ipcTarget: "tech.alatcerdas.omariglol"
   manageIpc: false
 
   property var anchorItem: null
@@ -43,7 +45,13 @@ Panel {
   property var report: null
   property bool measuring: false
   property string lastError: ""
+
+  property var discovery: null
+  property bool detecting: false
+  property string discoveryError: ""
+
   property bool runningScript: false
+  property bool pickingScript: false
   property string scriptStatus: ""
 
   readonly property color contentForeground: bar ? bar.foreground : Commons.Color.foreground
@@ -51,8 +59,21 @@ Panel {
 
   readonly property bool hasScript: root.scriptPath !== ""
   readonly property bool busy: root.measuring || root.runningScript
+  readonly property bool anyBusy: root.busy || root.detecting || root.pickingScript
   readonly property string triggerLabel: root.hasScript ? "RUN SCRIPT" : "MEASURE ALL"
+  readonly property string detectLabel: root.detecting
+    ? "SCANNING\u2026"
+    : (root.discovery ? "RESCAN" : "DETECT")
+
   readonly property var results: root.report && Array.isArray(root.report.results) ? root.report.results : []
+  readonly property var discovered: root.discovery && Array.isArray(root.discovery.found) ? root.discovery.found : []
+  readonly property string workspaceLabel: root.report
+    ? (root.report.workspace || "workspace")
+    : "no workspace loaded"
+  readonly property string scriptCardTitle: root.hasScript ? "SCRIPT LOADED" : "NO SCRIPT"
+  readonly property string scriptCardDetail: root.hasScript
+    ? root.scriptPath
+    : (root.pickingScript ? "Waiting for the file picker\u2026" : "Click to choose a Python script")
 
   // ---- Lifecycle. Opening the panel populates it if it has never run.
   function open() {
@@ -101,7 +122,7 @@ Panel {
   }
 
   function measure() {
-    if (root.busy) return
+    if (root.anyBusy) return
     root.measuring = true
     root.lastError = ""
     measureProc.running = true
@@ -109,15 +130,63 @@ Panel {
 
   // The trigger: a script wins when one is configured, otherwise measure all.
   function trigger() {
+    if (root.anyBusy) return
     if (root.hasScript) root.runScript()
     else root.measure()
   }
 
   function runScript() {
-    if (!root.hasScript || root.busy) return
+    if (!root.hasScript || root.anyBusy) return
     root.runningScript = true
     root.scriptStatus = ""
     scriptProc.running = true
+  }
+
+  // Scan the network without going through the desktop app. The CLI owns the
+  // network policy; the panel only renders what comes back.
+  function detect() {
+    if (root.anyBusy) return
+    root.detecting = true
+    root.discoveryError = ""
+    discoveryProc.running = true
+  }
+
+  function chooseScript() {
+    if (root.anyBusy) return
+    root.pickingScript = true
+    root.scriptStatus = ""
+    pickerProc.running = true
+  }
+
+  function handleScriptTap() {
+    if (root.anyBusy) return
+    if (root.hasScript) root.runScript()
+    else root.chooseScript()
+  }
+
+  function loadScript(path) {
+    var picked = String(path || "").trim()
+    if (!picked) return
+    root.persistScriptPath(picked)
+    root.scriptStatus = "Loaded " + Model.scriptName(picked)
+  }
+
+  // Mirror the choice locally and write it back to shell.json. Picking a
+  // script should survive a shell restart, matching the clock widget's
+  // format cycling.
+  function persistScriptPath(path) {
+    if (root.hostWidget && typeof root.hostWidget.setScriptPath === "function") {
+      root.hostWidget.setScriptPath(path)
+      return
+    }
+
+    var entry = { id: root.moduleName }
+    for (var key in root.settings)
+      if (key !== "id") entry[key] = root.settings[key]
+    entry.scriptPath = path
+    root.settings = entry
+    if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
+      root.bar.shell.updateEntryInline(root.moduleName, entry)
   }
 
   Process {
@@ -145,6 +214,36 @@ Panel {
   }
 
   Process {
+    id: discoveryProc
+    command: Model.discoverCommand(root.binary)
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        root.detecting = false
+        var parsed = Model.parseDiscovery(text)
+        if (parsed) {
+          root.discovery = parsed
+          root.discoveryError = ""
+        } else {
+          root.discoveryError = Model.firstLine(text) || "detection failed"
+        }
+      }
+    }
+    stderr: StdioCollector {
+      id: discoveryStderr
+      waitForEnd: true
+    }
+    onExited: function(code) {
+      if (code !== 0 && root.detecting) {
+        root.detecting = false
+        if (!root.discoveryError)
+          root.discoveryError = Model.firstLine(discoveryStderr.text)
+            || (root.binary + " discover exited " + code)
+      }
+    }
+  }
+
+  Process {
     id: scriptProc
     command: Model.scriptCommand(root.binary, root.scriptPath)
     stdout: StdioCollector {
@@ -157,6 +256,25 @@ Panel {
     onExited: function(code) {
       root.runningScript = false
       if (code !== 0) root.scriptStatus = "script exited " + code
+    }
+  }
+
+  Process {
+    id: pickerProc
+    command: Model.filePickerCommand()
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        root.pickingScript = false
+        var picked = String(text || "").trim()
+        if (picked) root.loadScript(picked)
+      }
+    }
+    onExited: function(code) {
+      root.pickingScript = false
+      // zenity exits 1 when the dialog is dismissed; that is not an error.
+      if (code !== 0 && code !== 1)
+        root.scriptStatus = "file picker exited " + code
     }
   }
 
@@ -192,7 +310,7 @@ Panel {
           width: scroll.width
           spacing: Style.space(14)
 
-          // ---- Hero: title, workspace, error.
+          // ---- Hero: title, workspace, count, error.
           Item {
             width: parent.width
             height: heroColumn.implicitHeight + Style.space(8)
@@ -206,19 +324,36 @@ Panel {
               anchors.verticalCenter: parent.verticalCenter
               spacing: Style.space(3)
 
-              Text {
-                text: "OMARIGLOL"
-                color: root.contentForeground
-                font.family: root.contentFontFamily
-                font.pixelSize: Style.font.title
-                font.bold: true
-                font.letterSpacing: 1
+              Row {
+                width: parent.width
+
+                Text {
+                  id: heroTitle
+                  text: "OMARIGLOL"
+                  color: root.contentForeground
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.title
+                  font.bold: true
+                  font.letterSpacing: 1
+                }
+
+                Item {
+                  width: Math.max(0, parent.width - heroTitle.width - heroCount.width)
+                  height: 1
+                }
+
+                Text {
+                  id: heroCount
+                  text: root.results.length + " IN WORKSPACE"
+                  color: Qt.darker(root.contentForeground, 1.6)
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.caption
+                  font.letterSpacing: 1
+                }
               }
 
               Text {
-                text: root.report
-                  ? (root.report.workspace || "workspace")
-                  : "no workspace loaded"
+                text: root.workspaceLabel
                 color: Qt.darker(root.contentForeground, 1.4)
                 font.family: root.contentFontFamily
                 font.pixelSize: Style.font.bodySmall
@@ -237,65 +372,112 @@ Panel {
             }
           }
 
-          // ---- Trigger: measure all, or run the script when one is loaded.
-          Rectangle {
-            id: triggerButton
+          // ---- Actions: trigger (measure / run script) and network detection.
+          Row {
+            id: actionRow
             width: parent.width - Style.space(32)
             anchors.horizontalCenter: parent.horizontalCenter
-            height: Style.space(40)
-            radius: Style.cornerRadius
-            color: triggerMouse.containsMouse && !root.busy
-              ? Style.hoverFillFor(root.contentForeground, Commons.Color.accent)
-              : Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.08)
-            border.width: Style.spacing.hairline
-            border.color: Style.normalBorderFor(root.contentForeground, Commons.Color.accent)
+            spacing: Style.space(8)
 
-            Text {
-              anchors.centerIn: parent
-              text: root.measuring
-                ? "MEASURING\u2026"
-                : (root.runningScript ? "RUNNING\u2026" : root.triggerLabel)
-              color: root.contentForeground
-              font.family: root.contentFontFamily
-              font.pixelSize: Style.font.body
-              font.bold: true
-              font.letterSpacing: 1
+            Rectangle {
+              id: triggerButton
+              width: Math.max(0, parent.width - detectButton.width - parent.spacing)
+              height: Style.space(40)
+              radius: Style.cornerRadius
+              color: triggerMouse.containsMouse && !root.anyBusy
+                ? Style.hoverFillFor(root.contentForeground, Commons.Color.accent)
+                : Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.08)
+              border.width: Style.spacing.hairline
+              border.color: Style.normalBorderFor(root.contentForeground, Commons.Color.accent)
+
+              Text {
+                anchors.centerIn: parent
+                text: root.measuring
+                  ? "MEASURING\u2026"
+                  : (root.runningScript ? "RUNNING\u2026" : root.triggerLabel)
+                color: root.anyBusy
+                  ? Qt.darker(root.contentForeground, 1.6)
+                  : root.contentForeground
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.body
+                font.bold: true
+                font.letterSpacing: 1
+              }
+
+              MouseArea {
+                id: triggerMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: root.anyBusy ? Qt.ArrowCursor : Qt.PointingHandCursor
+                enabled: !root.anyBusy
+                onClicked: root.trigger()
+              }
             }
 
-            MouseArea {
-              id: triggerMouse
-              anchors.fill: parent
-              hoverEnabled: true
-              cursorShape: root.busy ? Qt.ArrowCursor : Qt.PointingHandCursor
-              enabled: !root.busy
-              onClicked: root.trigger()
+            Rectangle {
+              id: detectButton
+              width: detectText.implicitWidth + Style.space(26)
+              height: triggerButton.height
+              radius: Style.cornerRadius
+              color: detectMouse.containsMouse && !root.anyBusy
+                ? Style.hoverFillFor(root.contentForeground, Commons.Color.accent)
+                : "transparent"
+              border.width: Style.spacing.hairline
+              border.color: root.discovery
+                ? Style.normalBorderFor(root.contentForeground, Commons.Color.accent)
+                : Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.22)
+
+              Text {
+                id: detectText
+                anchors.centerIn: parent
+                text: root.detectLabel
+                color: root.detecting
+                  ? Qt.darker(root.contentForeground, 1.5)
+                  : root.contentForeground
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.bodySmall
+                font.bold: true
+                font.letterSpacing: 1
+              }
+
+              MouseArea {
+                id: detectMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: root.anyBusy ? Qt.ArrowCursor : Qt.PointingHandCursor
+                enabled: !root.anyBusy
+                onClicked: root.detect()
+              }
             }
           }
 
-          // ---- Instrument list.
+          // ---- Workspace instrument list.
           Column {
             width: parent.width
             spacing: Style.space(2)
 
-            Text {
+            PanelSectionHeader {
               leftPadding: Style.space(16)
+              rightPadding: Style.space(16)
+              width: parent.width
               text: "INSTRUMENTS"
-              color: Qt.darker(root.contentForeground, 1.5)
-              font.family: root.contentFontFamily
-              font.pixelSize: Style.font.bodySmall
-              font.letterSpacing: 1
+              foreground: root.contentForeground
+              fontFamily: root.contentFontFamily
             }
 
             Text {
               visible: root.results.length === 0
               leftPadding: Style.space(16)
+              rightPadding: Style.space(16)
+              width: parent.width
               text: root.measuring
                 ? "Measuring\u2026"
-                : "No instruments. Add some in the desktop app."
+                : "No instruments in the workspace. Try Detect above."
               color: Qt.darker(root.contentForeground, 1.5)
               font.family: root.contentFontFamily
               font.pixelSize: Style.font.bodySmall
               font.italic: true
+              wrapMode: Text.WordWrap
             }
 
             Repeater {
@@ -362,43 +544,236 @@ Panel {
             }
           }
 
-          // ---- Script indicator / runner.
+          // ---- Network detection results.
+          Column {
+            width: parent.width
+            spacing: Style.space(2)
+            visible: root.detecting || root.discovery !== null || root.discoveryError !== ""
+
+            Item {
+              width: parent.width
+              height: Math.max(detectedTitle.implicitHeight, detectedSummary.implicitHeight) + Style.space(4)
+
+              PanelSectionHeader {
+                id: detectedTitle
+                anchors.left: parent.left
+                anchors.leftMargin: Style.space(16)
+                text: "DETECTED ON NETWORK"
+                foreground: root.contentForeground
+                fontFamily: root.contentFontFamily
+              }
+
+              Text {
+                id: detectedSummary
+                anchors.right: parent.right
+                anchors.rightMargin: Style.space(16)
+                anchors.top: parent.top
+                anchors.topMargin: Style.space(2)
+                text: root.detecting
+                  ? "scanning\u2026"
+                  : Model.discoverySummary(root.discovery)
+                color: Qt.darker(root.contentForeground, 1.5)
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.caption
+              }
+            }
+
+            Text {
+              visible: root.discoveryError !== ""
+              leftPadding: Style.space(16)
+              rightPadding: Style.space(16)
+              width: parent.width
+              text: root.discoveryError
+              color: Commons.Color.urgent
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.bodySmall
+              wrapMode: Text.WordWrap
+            }
+
+            Text {
+              visible: !root.detecting
+                && root.discoveryError === ""
+                && root.discovered.length === 0
+              leftPadding: Style.space(16)
+              rightPadding: Style.space(16)
+              width: parent.width
+              text: "No instruments detected."
+              color: Qt.darker(root.contentForeground, 1.5)
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.bodySmall
+              font.italic: true
+            }
+
+            Repeater {
+              model: root.discovered
+
+              Item {
+                required property var modelData
+                width: parent.width
+                height: Math.max(detectedLabelColumn.implicitHeight, Style.space(28)) + Style.space(8)
+
+                Text {
+                  id: detectedGlyph
+                  anchors.left: parent.left
+                  anchors.leftMargin: Style.space(16)
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: Model.discoveredGlyph(modelData)
+                  color: root.contentForeground
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.body
+                }
+
+                Text {
+                  id: detectedMethod
+                  anchors.right: parent.right
+                  anchors.rightMargin: Style.space(16)
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: Style.space(96)
+                  horizontalAlignment: Text.AlignRight
+                  elide: Text.ElideRight
+                  text: Model.discoveryMethod(modelData)
+                  color: Qt.darker(root.contentForeground, 1.5)
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.caption
+                }
+
+                Column {
+                  id: detectedLabelColumn
+                  anchors.left: detectedGlyph.right
+                  anchors.leftMargin: Style.space(10)
+                  anchors.right: detectedMethod.left
+                  anchors.rightMargin: Style.space(10)
+                  anchors.verticalCenter: parent.verticalCenter
+                  spacing: Style.space(1)
+
+                  Text {
+                    width: parent.width
+                    text: Model.discoveryName(modelData)
+                    color: root.contentForeground
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.body
+                    elide: Text.ElideRight
+                  }
+
+                  Text {
+                    width: parent.width
+                    text: Model.discoveryMeta(modelData)
+                    color: Qt.darker(root.contentForeground, 1.5)
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.caption
+                    elide: Text.ElideRight
+                  }
+                }
+              }
+            }
+          }
+
+          // ---- Script card: choose when empty, run when loaded, change always.
           Rectangle {
             id: scriptButton
             width: parent.width - Style.space(32)
             anchors.horizontalCenter: parent.horizontalCenter
-            height: Style.space(30)
+            height: Style.space(52)
             radius: Style.cornerRadius
-            color: scriptMouse.containsMouse && root.hasScript
+            color: (scriptMouse.containsMouse || changeMouse.containsMouse) && !root.anyBusy
               ? Style.hoverFillFor(root.contentForeground, Commons.Color.accent)
               : "transparent"
             border.width: Style.spacing.hairline
-            border.color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.15)
-
-            Text {
-              anchors.centerIn: parent
-              text: root.hasScript
-                ? ("SCRIPT: " + Model.scriptName(root.scriptPath))
-                : "NO SCRIPT"
-              color: root.hasScript
-                ? root.contentForeground
-                : Qt.darker(root.contentForeground, 1.8)
-              font.family: root.contentFontFamily
-              font.pixelSize: Style.font.bodySmall
-              font.letterSpacing: 1
-            }
+            border.color: root.hasScript
+              ? Style.normalBorderFor(root.contentForeground, Commons.Color.accent)
+              : Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.15)
 
             MouseArea {
               id: scriptMouse
               anchors.fill: parent
               hoverEnabled: true
-              cursorShape: root.hasScript ? Qt.PointingHandCursor : Qt.ArrowCursor
-              enabled: root.hasScript && !root.busy
-              onClicked: root.runScript()
+              cursorShape: root.anyBusy ? Qt.ArrowCursor : Qt.PointingHandCursor
+              enabled: !root.anyBusy
+              onClicked: root.handleScriptTap()
+            }
+
+            Text {
+              id: scriptGlyph
+              anchors.left: parent.left
+              anchors.leftMargin: Style.space(14)
+              anchors.verticalCenter: parent.verticalCenter
+              text: "PY"
+              color: root.hasScript
+                ? Commons.Color.accent
+                : Qt.darker(root.contentForeground, 1.8)
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.bodySmall
+              font.bold: true
+              font.letterSpacing: 1
+            }
+
+            Column {
+              anchors.left: scriptGlyph.right
+              anchors.leftMargin: Style.space(10)
+              anchors.right: changeText.left
+              anchors.rightMargin: Style.space(12)
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(2)
+
+              Text {
+                width: parent.width
+                text: root.scriptCardTitle
+                color: root.hasScript
+                  ? root.contentForeground
+                  : Qt.darker(root.contentForeground, 1.4)
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.bodySmall
+                font.bold: true
+                font.letterSpacing: 1
+              }
+
+              Text {
+                width: parent.width
+                text: root.scriptCardDetail
+                color: Qt.darker(root.contentForeground, 1.6)
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.caption
+                elide: Text.ElideRight
+              }
+            }
+
+            Text {
+              id: changeText
+              anchors.right: parent.right
+              anchors.rightMargin: Style.space(14)
+              anchors.verticalCenter: parent.verticalCenter
+              text: root.hasScript ? "CHANGE" : "BROWSE"
+              color: changeMouse.containsMouse && !root.anyBusy
+                ? Commons.Color.accent
+                : Qt.darker(root.contentForeground, 1.5)
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.caption
+              font.bold: true
+              font.letterSpacing: 1
+            }
+
+            MouseArea {
+              id: changeMouse
+              anchors.fill: changeText
+              hoverEnabled: true
+              cursorShape: root.anyBusy ? Qt.ArrowCursor : Qt.PointingHandCursor
+              enabled: !root.anyBusy
+              onClicked: root.chooseScript()
             }
           }
 
-          // ---- Footer: summary and script status.
+          Text {
+            visible: root.scriptStatus !== ""
+            width: parent.width - Style.space(32)
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: root.scriptStatus
+            color: Qt.darker(root.contentForeground, 1.5)
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.caption
+            elide: Text.ElideRight
+          }
+
+          // ---- Footer: measurement summary.
           Item {
             width: parent.width
             height: footerColumn.implicitHeight + Style.space(8)
@@ -418,16 +793,6 @@ Panel {
                 color: Qt.darker(root.contentForeground, 1.5)
                 font.family: root.contentFontFamily
                 font.pixelSize: Style.font.caption
-              }
-
-              Text {
-                visible: root.scriptStatus !== ""
-                width: parent.width
-                text: root.scriptStatus
-                color: Qt.darker(root.contentForeground, 1.4)
-                font.family: root.contentFontFamily
-                font.pixelSize: Style.font.caption
-                elide: Text.ElideRight
               }
             }
           }

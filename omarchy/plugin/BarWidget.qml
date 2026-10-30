@@ -18,7 +18,7 @@ import "Model.js" as Model
 // widget reads it through the loader, the same way omarchy.weather does.
 BarWidget {
   id: root
-  moduleName: "acabtech.omariglol"
+  moduleName: "tech.alatcerdas.omariglol"
 
   // The panel owns the report; the bar face is a read-out of it.
   readonly property var report: panelLoader.item ? panelLoader.item.report : null
@@ -33,6 +33,22 @@ BarWidget {
     if ("settings" in target) target.settings = root.settings
     if ("anchorItem" in target) target.anchorItem = button
     if ("hostWidget" in target) target.hostWidget = root
+  }
+
+  // Persist the Python script chosen from the panel's file picker. The update
+  // is mirrored locally first so the panel updates on the click itself, then
+  // written back to shell.json the same way the clock widget cycles formats.
+  function setScriptPath(path) {
+    var value = String(path || "")
+    if (value === String(setting("scriptPath", ""))) return
+
+    var entry = { id: root.moduleName }
+    for (var key in root.settings) if (key !== "id") entry[key] = root.settings[key]
+    entry.scriptPath = value
+
+    root.settings = entry
+    if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
+      root.bar.shell.updateEntryInline(root.moduleName, entry)
   }
 
   function refresh() {
@@ -87,7 +103,7 @@ BarWidget {
   }
 
   IpcHandler {
-    target: "acabtech.omariglol"
+    target: "tech.alatcerdas.omariglol"
 
     function open(): void { root.open() }
     function close(): void { root.close() }

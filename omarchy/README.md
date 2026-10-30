@@ -61,7 +61,7 @@ A bar widget also needs a **section**; enabling it without one leaves it
 enabled but invisible. If you enable it by hand:
 
 ```bash
-omarchy plugin enable acabtech.omariglol --section right
+omarchy plugin enable tech.alatcerdas.omariglol --section right
 ```
 
 The plugin does not speak SCPI itself — it shells out to the `riglol` binary.
@@ -73,17 +73,24 @@ Omarchy plugins run unsandboxed inside the long-lived shell process.
 - The bar face shows a glyph and the last run's `measured/total` count.
 - **Left click** opens the panel; **middle click** measures all; **right click**
   refreshes.
-- The panel has three things:
+- The panel has four things:
   1. a **trigger button** that measures every instrument in the workspace at
      once — unless a Python script is configured, in which case it runs the
      script instead;
-  2. the **instrument list**, with each instrument's last reading or error;
-  3. a small **script button** indicating the loaded Python script (optional).
+  2. a **Detect** button that scans the network from the shell itself and lists
+     discovered instruments with their address and discovery method;
+  3. the **workspace instrument list**, with each instrument's last reading or
+     error;
+  4. a clickable **script card**: `NO SCRIPT` opens a file picker, a loaded
+     script runs, and `CHANGE` picks a different one. The choice is persisted
+     in `shell.json`'s widget entry.
 
 The trigger calls `riglol measure --json`, which loads the active workspace
 from `~/.config/omariglol/workspaces`, connects to every instrument, runs a
 per-type default measurement (scope `:MEAS:FREQ?`, DMM `:MEAS:VOLT?`, spectrum
-analyzer `:CALC:MARK:Y?`) in parallel, and prints a JSON report.
+analyzer `:CALC:MARK:Y?`) in parallel, and prints a JSON report. **Detect**
+calls `riglol discover --json --mdns`, so discovery uses the same engine as the
+CLI and desktop app.
 
 ### Settings
 

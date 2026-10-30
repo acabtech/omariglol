@@ -24,6 +24,29 @@ function measureCommand(binary, workspace, command) {
   return args;
 }
 
+/** The argv for a full discovery pass, including mDNS and the subnet scan. */
+function discoverCommand(binary) {
+  return [
+    binary || "riglol",
+    "discover",
+    "--json",
+    "--mdns",
+    "--timeout",
+    "3",
+  ];
+}
+
+/** The argv for the native folder picker (zenity ships with Omarchy). */
+function filePickerCommand() {
+  return [
+    "zenity",
+    "--file-selection",
+    "--title=omariglol - choose a Python script",
+    "--file-filter=Python scripts | *.py",
+    "--file-filter=All files | *",
+  ];
+}
+
 /** The argv for `riglol run <script>`. */
 function scriptCommand(binary, path) {
   return [binary || "riglol", "run", String(path)];
@@ -41,6 +64,23 @@ function parseReport(text) {
   try {
     var parsed = JSON.parse(raw);
     if (!parsed || !Array.isArray(parsed.results)) return null;
+    return parsed;
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Parse a `riglol discover --json` report.
+ *
+ * Returns the report object, or null when the text is not a discovery report.
+ */
+function parseDiscovery(text) {
+  var raw = String(text || "").trim();
+  if (!raw) return null;
+  try {
+    var parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.found)) return null;
     return parsed;
   } catch (e) {
     return null;
@@ -115,6 +155,82 @@ function instrumentGlyph(type) {
     default:
       return GLYPH_UNKNOWN;
   }
+}
+
+/** A best-effort instrument type from a discovery entry's model/IDN. */
+function discoveredType(instrument) {
+  var source = instrument || {};
+  var text = String(source.model || source.idn || "").toLowerCase();
+  var capabilities = Array.isArray(source.capabilities)
+    ? source.capabilities.join(" ").toLowerCase()
+    : "";
+  var haystack = text + " " + capabilities;
+
+  if (haystack.indexOf("multimeter") >= 0 || haystack.indexOf("dmm") >= 0)
+    return "multimeter";
+  if (haystack.indexOf("electronic-load") >= 0 || haystack.indexOf("electronic load") >= 0)
+    return "electronic-load";
+  if (haystack.indexOf("power-supply") >= 0 || haystack.indexOf("power supply") >= 0 || haystack.indexOf("psu") >= 0)
+    return "power-supply";
+  if (haystack.indexOf("signal-generator") >= 0 || haystack.indexOf("signal generator") >= 0)
+    return "signal-generator";
+  if (haystack.indexOf("spectrum") >= 0 || haystack.indexOf("analyzer") >= 0)
+    return "spectrum-analyzer";
+  if (haystack.indexOf("switch") >= 0 || haystack.indexOf("matrix") >= 0)
+    return "switch-module";
+  if (haystack.indexOf("oscilloscope") >= 0 || haystack.indexOf("scope") >= 0
+      || haystack.indexOf("dso") >= 0 || haystack.indexOf("mso") >= 0)
+    return "oscilloscope";
+  return "unknown";
+}
+
+/** The glyph for a discovery entry. */
+function discoveredGlyph(instrument) {
+  return instrumentGlyph(discoveredType(instrument));
+}
+
+/** A display name for a discovery entry. */
+function discoveryName(instrument) {
+  var entry = instrument || {};
+  var device = entry.device || {};
+  var name = entry.model || entry.idn || device.mdns_name || device.hostname || "";
+  return String(name) || discoveryAddress(entry);
+}
+
+/** The address of a discovery entry. */
+function discoveryAddress(instrument) {
+  var device = (instrument && instrument.device) || {};
+  return String(device.address || "");
+}
+
+/** The discovery method, in the CLI's kebab-case form. */
+function discoveryMethod(instrument) {
+  var device = (instrument && instrument.device) || {};
+  return String(device.method || "");
+}
+
+/** The secondary line for a discovery row. */
+function discoveryMeta(instrument) {
+  var entry = instrument || {};
+  var parts = [];
+  var address = discoveryAddress(entry);
+  var method = discoveryMethod(entry);
+  if (address) parts.push(address);
+  if (method) parts.push(method);
+  if (entry.vendor) parts.push(entry.vendor);
+  if (entry.serial) parts.push(entry.serial);
+  return parts.join(" \u00B7 ");
+}
+
+/** A one-line summary of a discovery report. */
+function discoverySummary(report) {
+  if (!report || !Array.isArray(report.found)) return "";
+  var parts = [report.found.length + " found"];
+  if (typeof report.probed_hosts === "number")
+    parts.push(report.probed_hosts + " probed");
+  if (typeof report.elapsed_ms === "number")
+    parts.push(Math.round(report.elapsed_ms) + " ms");
+  return parts.join(" \u00B7 ");
 }
 
 /** The value cell for one result: the reading, or the error. */

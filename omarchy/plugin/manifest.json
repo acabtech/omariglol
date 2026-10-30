@@ -1,18 +1,18 @@
 {
   "schemaVersion": 1,
-  "id": "acabtech.omariglol",
+  "id": "tech.alatcerdas.omariglol",
   "name": "omariglol",
   "version": "0.1.2",
   "author": "Sam Ralial",
   "license": "MIT",
-  "description": "Measure every instrument in the active workspace from the Omarchy bar.",
+  "description": "Measure, detect and script LXI instruments from the Omarchy bar.",
   "kinds": ["bar-widget"],
   "entryPoints": {
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
     "displayName": "omariglol",
-    "description": "Click: instrument panel. Middle click: measure all. Right click: refresh.",
+    "description": "Click: instrument panel with network detection and script picker. Middle click: measure all. Right click: refresh.",
     "category": "Hardware",
     "allowMultiple": true,
     "defaultSection": "right",
@@ -41,7 +41,7 @@
         "key": "scriptPath",
         "type": "string",
         "label": "Python script (optional)",
-        "description": "Absolute path to a Python script. When set, the trigger runs the script instead of measuring every instrument.",
+        "description": "Absolute path to a Python script. When set, the trigger runs the script instead of measuring every instrument. You can also pick one from the panel's NO SCRIPT button.",
         "defaultValue": ""
       },
       {

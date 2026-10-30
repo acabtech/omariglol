@@ -96,13 +96,14 @@ Plugin kinds and their entry points:
 | `bar` | `bar` | `Bar.qml` | full bar replacement |
 
 Third-party plugin ids are namespaced; the `omarchy.` prefix is reserved. Ours
-is `acabtech.omariglol`.
+is `tech.alatcerdas.omariglol`.
 
 ### Ours
 
 `omarchy/plugin/` is a `bar-widget` plugin: a top-bar item showing how many
 instruments the last run measured, with a panel that lists the workspace's
-instruments and fires a simultaneous measurement of all of them.
+instruments, detects instruments on the network, and fires a simultaneous
+measurement of all of them.
 
 Install with:
 
@@ -112,13 +113,18 @@ omarchy plugin add /path/to/omariglol/omarchy/plugin --enable
 omarchy plugin add https://github.com/acabtech/omariglol.git --enable
 ```
 
-The panel has three things:
+The panel has four things:
 
 1. a **trigger button** that measures every instrument in the active workspace
    at once — unless a Python script is configured, in which case it runs the
    script instead;
-2. the **instrument list**, with each instrument's last reading or error;
-3. a small **script button** indicating the loaded Python script (optional).
+2. a **Detect** button that runs `riglol discover --json --mdns` and lists the
+   instruments found, with their address and discovery method;
+3. the **workspace instrument list**, with each instrument's last reading or
+   error;
+4. a clickable **script card**: `NO SCRIPT` opens a zenity file picker, a loaded
+   script runs, and `CHANGE` picks another. The selected path is written back
+   to the widget's `shell.json` entry.
 
 The plugin does **not** speak SCPI itself. It shells out to the `riglol`
 binary, keeping the protocol in one place and the QML trivial. The trigger runs

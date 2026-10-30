@@ -140,7 +140,7 @@ install -m644 "$here/omarchy/themed/omariglol-theme.toml.tpl" \
 
 # 4. Plugin second: it depends on the theme being in place.
 log "reinstalling the shell plugin"
-plugin_dest="$target_home/.config/omarchy/plugins/acabtech.omariglol"
+plugin_dest="$target_home/.config/omarchy/plugins/tech.alatcerdas.omariglol"
 rm -rf "$plugin_dest"
 mkdir -p "$(dirname "$plugin_dest")"
 cp -r "$here/omarchy/plugin" "$plugin_dest"

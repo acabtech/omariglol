@@ -48,7 +48,7 @@ Python scripting plus Omarchy integration.
 ### Omarchy
 
 - [ ] `omarchy/themed/omariglol-theme.toml.tpl` template
-- [ ] `acabtech.omariglol` bar-widget plugin + panel
+- [ ] `tech.alatcerdas.omariglol` bar-widget plugin + panel
 - [ ] Installer script that copies the template and registers the plugin
 
 ## 0.2.0 — scripting depth

@@ -135,7 +135,7 @@ else
   info "start it with: omarchy restart shell"
 fi
 
-plugin="$target_home/.config/omarchy/plugins/acabtech.omariglol"
+plugin="$target_home/.config/omarchy/plugins/tech.alatcerdas.omariglol"
 if [[ -f "$plugin/manifest.json" ]]; then
   ok "shell plugin installed"
 else
@@ -144,11 +144,11 @@ else
 fi
 
 shell_json="$target_home/.config/omarchy/shell.json"
-if [[ -f "$shell_json" ]] && grep -q 'acabtech.omariglol' "$shell_json" 2>/dev/null; then
+if [[ -f "$shell_json" ]] && grep -q 'tech.alatcerdas.omariglol' "$shell_json" 2>/dev/null; then
   ok "plugin registered in shell.json"
 else
   warn "plugin not registered in shell.json"
-  info "enable it with: omarchy plugin enable acabtech.omariglol"
+  info "enable it with: omarchy plugin enable tech.alatcerdas.omariglol"
 fi
 
 # --- Theme ------------------------------------------------------------------

@@ -59,13 +59,15 @@ die() {
   exit 1
 }
 
-# Re-exec the whole script under sudo when a step needs root. The state dir is
-# passed through so the escalated run logs to the same place.
+# Re-exec the whole script under sudo when a step needs root. The state dir and
+# the resolved omarchy path are passed through so the escalated run logs to the
+# same place and can still register the plugin (sudo resets PATH).
 ensure_root() {
   [[ "$(id -u)" -eq 0 ]] && return 0
   command -v sudo >/dev/null 2>&1 || die "root is required but sudo was not found"
   log "escalating to root (sudo)"
   exec sudo env OMARIGLOL_STATE_DIR="$state_dir" \
+    OMARIGLOL_OMARCHY_BIN="$omarchy_bin" \
     "$here/scripts/$(basename "$0")" "${orig_args[@]}"
 }
 
@@ -77,6 +79,22 @@ own() {
 }
 
 have() { command -v "$1" >/dev/null 2>&1; }
+
+# Resolve the Omarchy CLI once, before any sudo re-exec can reset PATH.
+# `sudo` uses its own secure_path, which normally drops the user's
+# ~/.local/bin, so capturing the absolute path here is what keeps the plugin
+# registration step from silently skipping under `--system`.
+omarchy_bin="${OMARIGLOL_OMARCHY_BIN:-$(command -v omarchy 2>/dev/null || true)}"
+
+# Run a command as the invoking user. When the script is escalated to root,
+# omarchy must still write into the target user's shell config, not root's.
+run_as_target() {
+  if [[ "$(id -u)" -eq 0 && -n "$target_user" && "$target_user" != "root" ]]; then
+    sudo -u "$target_user" -- "$@"
+  else
+    "$@"
+  fi
+}
 
 # --- Argument parsing -------------------------------------------------------
 system_install=0
@@ -229,7 +247,7 @@ install_theme() {
 install_plugin() {
   local src="$here/omarchy/plugin"
   [[ -d "$src" ]] || die "plugin directory not found at $src"
-  local dest="$target_home/.config/omarchy/plugins/acabtech.omariglol"
+  local dest="$target_home/.config/omarchy/plugins/tech.alatcerdas.omariglol"
   local section="${OMARIGLOL_PLUGIN_SECTION:-right}"
 
   # `omarchy plugin add <git-url>` clones the repository and validates
@@ -243,33 +261,50 @@ install_plugin() {
   # linger next to the freshly installed ones.
   rm -rf "$dest"
   cp -r "$src" "$dest"
+  # Remove the pre-rename plugin tree so it cannot stay enabled alongside the
+  # new id and show a duplicate widget in the bar.
+  rm -rf "$target_home/.config/omarchy/plugins/acabtech.omariglol"
   own "$(dirname "$dest")"
 
-  if ! have omarchy; then
+  if [[ -z "$omarchy_bin" ]]; then
     warn "omarchy not found; enable the plugin via Setup > Plugins"
     return 0
   fi
 
-  log "enabling acabtech.omariglol in the bar (--section $section)"
-  omarchy shell rescanPlugins >/dev/null 2>&1 || true
+  log "enabling tech.alatcerdas.omariglol in the bar (--section $section)"
 
   # A bar widget needs a *section*. `omarchy plugin enable <id>` with no
   # placement marks it enabled but never adds it to the bar layout, so the
   # widget is silently absent. Always pass --section.
-  if ! omarchy plugin enable acabtech.omariglol --section "$section"; then
-    warn "could not enable the plugin"
-    warn "run: omarchy plugin enable acabtech.omariglol --section $section"
-    warn "or use Setup > Plugins in the Omarchy menu"
-    return 0
-  fi
+  #
+  # Do not `omarchy shell rescanPlugins` first: `plugin enable` reads the
+  # plugins directory directly and rewrites shell.json itself, and a rescan
+  # issued just before it can race with that write and make enable fail
+  # intermittently ("could not enable the plugin" on a plugin that is
+  # otherwise discovered). Retry a couple of times to absorb a transient
+  # shell.json lock.
+  local attempt=1
+  local max_attempts=3
+  until run_as_target "$omarchy_bin" plugin enable tech.alatcerdas.omariglol --section "$section"; do
+    if [[ "$attempt" -ge "$max_attempts" ]]; then
+      warn "could not enable the plugin"
+      warn "run: omarchy plugin enable tech.alatcerdas.omariglol --section $section"
+      warn "or use Setup > Plugins in the Omarchy menu"
+      return 0
+    fi
+    warn "enable failed (attempt $attempt/$max_attempts); retrying"
+    attempt=$((attempt + 1))
+    sleep 0.5
+  done
 
   log "plugin enabled; it appears in the $section bar section after a shell restart"
 }
 
 restart_shell() {
-  if have omarchy; then
+  if [[ -n "$omarchy_bin" ]]; then
     log "restarting the shell"
-    omarchy restart shell >/dev/null 2>&1 || warn "could not restart the shell; run 'omarchy restart shell'"
+    run_as_target "$omarchy_bin" restart shell >/dev/null 2>&1 ||
+      warn "could not restart the shell; run 'omarchy restart shell'"
   elif have omarchy-shell; then
     omarchy-shell shell rescanPlugins >/dev/null 2>&1 || warn "could not rescan plugins"
   else
@@ -281,20 +316,20 @@ restart_shell() {
 # if it did not. A plugin that is installed but not placed is invisible, which
 # is the failure this guards against.
 verify_plugin() {
-  have omarchy || return 0
+  [[ -n "$omarchy_bin" ]] || return 0
   local listing
-  listing="$(omarchy plugin list --json 2>/dev/null || true)"
+  listing="$(run_as_target "$omarchy_bin" plugin list --json 2>/dev/null || true)"
   case "$listing" in
-    *'"id":"acabtech.omariglol"'*)
-      if printf '%s' "$listing" | grep -q '"id":"acabtech.omariglol"[^}]*"enabled":true'; then
-        log "verified: acabtech.omariglol is enabled"
+    *'"id":"tech.alatcerdas.omariglol"'*)
+      if printf '%s' "$listing" | grep -q '"id":"tech.alatcerdas.omariglol"[^}]*"enabled":true'; then
+        log "verified: tech.alatcerdas.omariglol is enabled"
       else
-        warn "acabtech.omariglol is installed but disabled"
-        warn "run: omarchy plugin enable acabtech.omariglol right"
+        warn "tech.alatcerdas.omariglol is installed but disabled"
+        warn "run: omarchy plugin enable tech.alatcerdas.omariglol right"
       fi
       ;;
     *)
-      warn "acabtech.omariglol was not discovered by omarchy"
+      warn "tech.alatcerdas.omariglol was not discovered by omarchy"
       ;;
   esac
 }
@@ -326,5 +361,5 @@ else
   echo "  CLI:    $target_home/.local/bin/riglol"
 fi
 echo "  config: $target_home/.config/omariglol/config.toml"
-echo "  plugin: $target_home/.config/omarchy/plugins/acabtech.omariglol"
+echo "  plugin: $target_home/.config/omarchy/plugins/tech.alatcerdas.omariglol"
 echo "  logs:   $log_dir"

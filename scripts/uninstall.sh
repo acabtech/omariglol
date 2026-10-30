@@ -155,7 +155,7 @@ if [[ "$do_backup" == 1 ]]; then
   tar -czf "$archive" --ignore-failed-read -C "$target_home" \
     .config/omariglol \
     .config/omarchy/themed/omariglol-theme.toml.tpl \
-    .config/omarchy/plugins/acabtech.omariglol 2>/dev/null ||
+    .config/omarchy/plugins/tech.alatcerdas.omariglol 2>/dev/null ||
     warn "backup was incomplete (some paths were missing)"
 fi
 
@@ -178,9 +178,12 @@ fi
 # back to removing the directory directly.
 log "removing the shell plugin"
 if have omarchy; then
-  omarchy plugin remove acabtech.omariglol --yes >/dev/null 2>&1 ||
+  omarchy plugin remove tech.alatcerdas.omariglol --yes >/dev/null 2>&1 ||
     warn "omarchy plugin remove failed; removing files directly"
+  # Best-effort removal of the pre-rename plugin id.
+  omarchy plugin remove acabtech.omariglol --yes >/dev/null 2>&1 || true
 fi
+rm -rf "$target_home/.config/omarchy/plugins/tech.alatcerdas.omariglol"
 rm -rf "$target_home/.config/omarchy/plugins/acabtech.omariglol"
 
 # --- Remove the theme template ----------------------------------------------

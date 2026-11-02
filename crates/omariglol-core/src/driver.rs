@@ -34,6 +34,7 @@ pub enum InstrumentType {
     SpectrumAnalyzer,
     ElectronicLoad,
     SwitchModule,
+    VectorNetworkAnalyzer,
     Unknown,
 }
 
@@ -48,6 +49,7 @@ impl InstrumentType {
             InstrumentType::SpectrumAnalyzer => "spectrum analyzer",
             InstrumentType::ElectronicLoad => "electronic load",
             InstrumentType::SwitchModule => "switch module",
+            InstrumentType::VectorNetworkAnalyzer => "vector network analyzer",
             InstrumentType::Unknown => "instrument",
         }
     }
@@ -62,6 +64,7 @@ impl InstrumentType {
             InstrumentType::SpectrumAnalyzer => "sa",
             InstrumentType::ElectronicLoad => "load",
             InstrumentType::SwitchModule => "sw",
+            InstrumentType::VectorNetworkAnalyzer => "vna",
             InstrumentType::Unknown => "inst",
         }
     }
@@ -95,6 +98,12 @@ pub fn classify_idn(idn: &str) -> InstrumentType {
     ];
     const LOAD: &[&str] = &["N3300", "DL3", "EL3", "LOAD"];
     const SWITCH: &[&str] = &["34970", "34980", "SWITCH", "MUX"];
+
+    // NanoVNA identifies itself as "NanoVNA-H,USBFix,...", so the vendor field
+    // is the stable signal; the model field is the firmware flavor.
+    if upper.starts_with("NANOVNA") {
+        return InstrumentType::VectorNetworkAnalyzer;
+    }
 
     let model = idn_model(&upper);
     let haystack = if model.is_empty() {
@@ -324,6 +333,28 @@ fn generic_commands(instrument_type: InstrumentType) -> Vec<DriverCommand> {
                     .described("route", "Open a channel"),
             ]);
         }
+        InstrumentType::VectorNetworkAnalyzer => {
+            commands.extend([
+                DriverCommand::new("sweep_start", ":VNA:SWE:START", false)
+                    .described("sweep", "Set sweep start frequency"),
+                DriverCommand::new("sweep_stop", ":VNA:SWE:STOP", false)
+                    .described("sweep", "Set sweep stop frequency"),
+                DriverCommand::new("sweep_points", ":VNA:SWE:POINTS", false)
+                    .described("sweep", "Set sweep point count"),
+                DriverCommand::new("sweep_execute", ":VNA:SWE:EXEC", false)
+                    .described("acquire", "Run one sweep"),
+                DriverCommand::new("frequency", ":VNA:FREQ", false)
+                    .described("output", "Tune to one frequency"),
+                DriverCommand::new("pause", ":VNA:PAUSE", false)
+                    .described("acquire", "Pause continuous sweep"),
+                DriverCommand::new("resume", ":VNA:RESUME", false)
+                    .described("acquire", "Resume continuous sweep"),
+                DriverCommand::new("data_s11", ":VNA:DATA:CHUNK? 0,0,16", true)
+                    .described("measure", "Read a chunk of S11 data"),
+                DriverCommand::new("data_s21", ":VNA:DATA:CHUNK? 1,0,16", true)
+                    .described("measure", "Read a chunk of S21 data"),
+            ]);
+        }
         InstrumentType::Unknown => {}
     }
 
@@ -368,11 +399,18 @@ pub struct DriverProfile {
 ///
 /// No other code needs to change: discovery, `riglol driver`, measurement and
 /// the scripting API all read the resulting command table.
-pub static DRIVER_PROFILES: &[DriverProfile] = &[DriverProfile {
-    name: "Rigol DS1000Z",
-    idn_prefixes: DS1000Z_PREFIXES,
-    build: ds1000z_commands,
-}];
+pub static DRIVER_PROFILES: &[DriverProfile] = &[
+    DriverProfile {
+        name: "Rigol DS1000Z",
+        idn_prefixes: DS1000Z_PREFIXES,
+        build: ds1000z_commands,
+    },
+    DriverProfile {
+        name: "NanoVNA USBFix",
+        idn_prefixes: NANOVNA_PREFIXES,
+        build: nanovna_commands,
+    },
+];
 
 /// The rich profile matching an `*IDN?` string, if any.
 pub fn driver_profile_for_idn(idn: &str) -> Option<&'static DriverProfile> {
@@ -389,6 +427,55 @@ pub fn driver_profile_for_idn(idn: &str) -> Option<&'static DriverProfile> {
 fn vendor_commands(idn: &str) -> Option<(&'static str, Vec<DriverCommand>)> {
     let profile = driver_profile_for_idn(idn)?;
     Some((profile.name, (profile.build)()))
+}
+
+/// `*IDN?` prefixes that select the NanoVNA USBFix profile.
+const NANOVNA_PREFIXES: &[&str] = &["NANOVNA"];
+
+/// The operation surface exposed by the NanoVNA USBTMC firmware.
+///
+/// These are the structured `:VNA:` commands implemented by
+/// `acabtech/NanoVNAUSBFix`. `:VNA:CMD` and `:VNA:CMD?` remain available as a
+/// generic escape hatch for the full stock shell command set.
+fn nanovna_commands() -> Vec<DriverCommand> {
+    let mut commands = standard_commands();
+
+    commands.extend([
+        DriverCommand::new("sweep_start", ":VNA:SWE:START", false)
+            .described("sweep", "Set sweep start frequency (Hz)"),
+        DriverCommand::new("sweep_stop", ":VNA:SWE:STOP", false)
+            .described("sweep", "Set sweep stop frequency (Hz)"),
+        DriverCommand::new("sweep_points", ":VNA:SWE:POINTS", false)
+            .described("sweep", "Set sweep point count"),
+        DriverCommand::new("sweep_start_query", ":VNA:SWE:START?", true)
+            .described("sweep", "Read sweep start frequency"),
+        DriverCommand::new("sweep_stop_query", ":VNA:SWE:STOP?", true)
+            .described("sweep", "Read sweep stop frequency"),
+        DriverCommand::new("sweep_points_query", ":VNA:SWE:POINTS?", true)
+            .described("sweep", "Read sweep point count"),
+        DriverCommand::new("sweep_execute", ":VNA:SWE:EXEC", false)
+            .described("acquire", "Run one sweep"),
+        DriverCommand::new("frequency", ":VNA:FREQ", false)
+            .described("output", "Tune to one frequency (Hz)"),
+        DriverCommand::new("frequency_query", ":VNA:FREQ?", true)
+            .described("output", "Read current CW frequency"),
+        DriverCommand::new("pause", ":VNA:PAUSE", false)
+            .described("acquire", "Pause continuous sweep"),
+        DriverCommand::new("resume", ":VNA:RESUME", false)
+            .described("acquire", "Resume continuous sweep"),
+        DriverCommand::new("data_s11", ":VNA:DATA:CHUNK? 0,0,16", true)
+            .described("measure", "Read a chunk of S11 complex data"),
+        DriverCommand::new("data_s21", ":VNA:DATA:CHUNK? 1,0,16", true)
+            .described("measure", "Read a chunk of S21 complex data"),
+        DriverCommand::new("data_all", ":VNA:DATA?", true)
+            .described("measure", "Read the first data chunk that fits"),
+        DriverCommand::new("command", ":VNA:CMD", false)
+            .described("system", "Run a stock NanoVNA shell command"),
+        DriverCommand::new("command_query", ":VNA:CMD?", true)
+            .described("system", "Run a stock shell command and read its output"),
+    ]);
+
+    commands
 }
 
 /// `*IDN?` prefixes that select the Rigol DS1000Z rich profile.
@@ -644,6 +731,37 @@ mod tests {
     fn test_classify_unknown() {
         assert_eq!(classify_idn("ACME,WIDGET,SN,1.0"), InstrumentType::Unknown);
         assert_eq!(classify_idn(""), InstrumentType::Unknown);
+    }
+
+    #[test]
+    fn test_classify_nanovna() {
+        assert_eq!(
+            classify_idn("NanoVNA-H,USBFix,1.2.50,00000000"),
+            InstrumentType::VectorNetworkAnalyzer
+        );
+        assert_eq!(
+            InstrumentType::VectorNetworkAnalyzer.label(),
+            "vector network analyzer"
+        );
+        assert_eq!(InstrumentType::VectorNetworkAnalyzer.glyph(), "vna");
+    }
+
+    #[test]
+    fn test_nanovna_rich_profile() {
+        let driver = InstrumentDriver::from_idn("NanoVNA-H,USBFix,1.2.50,00000000");
+        assert_eq!(driver.profile.as_deref(), Some("NanoVNA USBFix"));
+        assert_eq!(driver.instrument_type, InstrumentType::VectorNetworkAnalyzer);
+        assert_eq!(
+            driver.command("sweep_start").unwrap().scpi,
+            ":VNA:SWE:START"
+        );
+        assert_eq!(
+            driver.command("data_s11").unwrap().scpi,
+            ":VNA:DATA:CHUNK? 0,0,16"
+        );
+        assert!(driver.command("data_s11").unwrap().query);
+        assert!(driver.command("identify").is_some());
+        assert!(driver.groups().contains(&"sweep".to_string()));
     }
 
     #[test]

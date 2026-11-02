@@ -59,6 +59,19 @@ sudo scripts/install-usb-udev.sh
 `riglol usb list` shows every attached device and whether it exposes a USBTMC
 interface.
 
+### NanoVNA-H
+
+[`19_nanovna.sh`](19_nanovna.sh) drives a NanoVNA-H flashed with
+`NanoVNA-H-1.2.50-USBTMC.bin` from
+[acabtech/NanoVNAUSBFix](https://github.com/acabtech/NanoVNAUSBFix). The VNA
+keeps its stock VID/PID (`0483:5740`); the USBTMC interface class is what makes
+it an instrument:
+
+```sh
+./19_nanovna.sh
+./19_nanovna.sh usb:0x0483:0x5740
+```
+
 ## The examples
 
 [`00_smoke_test.sh`](00_smoke_test.sh) runs every function below end to end,

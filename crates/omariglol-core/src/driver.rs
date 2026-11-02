@@ -750,7 +750,10 @@ mod tests {
     fn test_nanovna_rich_profile() {
         let driver = InstrumentDriver::from_idn("NanoVNA-H,USBFix,1.2.50,00000000");
         assert_eq!(driver.profile.as_deref(), Some("NanoVNA USBFix"));
-        assert_eq!(driver.instrument_type, InstrumentType::VectorNetworkAnalyzer);
+        assert_eq!(
+            driver.instrument_type,
+            InstrumentType::VectorNetworkAnalyzer
+        );
         assert_eq!(
             driver.command("sweep_start").unwrap().scpi,
             ":VNA:SWE:START"

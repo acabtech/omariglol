@@ -4,6 +4,16 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 semantic versioning.
 
+## [Unreleased]
+
+### Added
+
+- NanoVNA USBFix driver profile. A NanoVNA-H running the USBTMC firmware from
+  [acabtech/NanoVNAUSBFix](https://github.com/acabtech/NanoVNAUSBFix) is
+  classified as a vector network analyzer and exposes sweep, acquisition,
+  frequency, S11/S21 data and stock-shell escape-hatch operations.
+- `examples/scpi/19_nanovna.sh` and `docs/nanovna.md`.
+
 ## [0.1.4] — 2026-11-02
 
 Release hardening after end-to-end testing of 0.1.3 on a Rigol DS1054Z over

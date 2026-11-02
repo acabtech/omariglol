@@ -108,9 +108,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let start = Instant::now();
             match rpc::pmap_dump(host, TIMEOUT) {
                 Ok(mappings) => {
-                    let has_core = mappings.iter().any(|m| {
-                        m.prog == vxi11::DEVICE_CORE && m.prot == rpc::IPPROTO_TCP
-                    });
+                    let has_core = mappings
+                        .iter()
+                        .any(|m| m.prog == vxi11::DEVICE_CORE && m.prot == rpc::IPPROTO_TCP);
                     if has_core {
                         dump_ok += 1;
                         dump_latency.push(start.elapsed().as_secs_f64() * 1000.0);

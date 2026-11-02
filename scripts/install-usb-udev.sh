@@ -4,7 +4,7 @@
 set -eu
 
 RULE="99-omariglol-usb.rules"
-SRC_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SRC_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 DEST_DIR="${DEST_DIR:-/etc/udev/rules.d}"
 
 if [ "$(id -u)" -ne 0 ]; then

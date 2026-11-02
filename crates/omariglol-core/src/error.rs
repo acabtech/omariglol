@@ -71,9 +71,7 @@ impl Error {
             ),
             // libusb reports a bulk/control timeout as a plain error string, so
             // classify it by message. The USB layer always spells it "timeout".
-            Error::Usb(msg) | Error::UsbTmc(msg) => {
-                msg.to_ascii_lowercase().contains("timeout")
-            }
+            Error::Usb(msg) | Error::UsbTmc(msg) => msg.to_ascii_lowercase().contains("timeout"),
             _ => false,
         }
     }

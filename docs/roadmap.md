@@ -1,11 +1,12 @@
 # Roadmap
 
-## 0.1.3 → 0.1.6 — SCPI over USB
+## 0.1.4 → 0.1.6 — SCPI over USB
 
-USB work is pulled forward out of 0.2.0. The full plan is in
-[`plans/0.1.3-usb-scpi.md`](../plans/0.1.3-usb-scpi.md).
+USB work is pulled forward out of 0.2.0. 0.1.3 delivered the initial DS1054Z
+transport; 0.1.4 is the hardening release that followed end-to-end testing. The
+full plan is in [`plans/0.1.3-usb-scpi.md`](../plans/0.1.3-usb-scpi.md).
 
-### 0.1.3 — Rigol DS1054Z over USBTMC
+### 0.1.3 — Rigol DS1054Z over USBTMC (delivered)
 
 - [x] `usb` — `UsbId`, `UsbSelector`, enumeration, driver status
 - [x] `usb::backend` — rusb-backed bulk/control transfers, feature-gated
@@ -19,8 +20,9 @@ USB work is pulled forward out of 0.2.0. The full plan is in
 - [x] Non-disruptive UDP portmapper LXI detection (M0 spike)
 - [x] `PMAP_DUMP` presence-flag decoding fix for broadcast discovery
 
-### 0.1.4 — generic USBTMC and USB discovery
+### 0.1.4 — hardening, generic USBTMC and USB discovery
 
+- [x] End-to-end hardening after 0.1.3 hardware testing (see `CHANGELOG.md`)
 - [ ] Any USBTMC-class instrument verified on hardware
 - [ ] Hotplug events
 - [x] USB merged into discovery and the Discovery panel

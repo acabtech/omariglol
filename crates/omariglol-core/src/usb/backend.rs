@@ -29,9 +29,7 @@ fn map_err(err: rusb::Error) -> Error {
 /// Find the USBTMC interface and its bulk endpoints in a device's active config.
 ///
 /// Returns `(interface_number, bulk_in_endpoint, bulk_out_endpoint)`.
-fn find_usbtmc_interface(
-    device: &rusb::Device<Context>,
-) -> Option<(u8, u8, u8)> {
+fn find_usbtmc_interface(device: &rusb::Device<Context>) -> Option<(u8, u8, u8)> {
     let config = device.active_config_descriptor().ok()?;
     for interface in config.interfaces() {
         for descriptor in interface.descriptors() {
@@ -109,26 +107,19 @@ impl UsbHandle {
 
             // Serial filter, which needs the open handle to read the string.
             if let Some(serial) = &selector.serial {
-                let found = handle
-                    .read_serial_number_string_ascii(&descriptor)
-                    .ok();
+                let found = handle.read_serial_number_string_ascii(&descriptor).ok();
                 if found.as_deref() != Some(serial.as_str()) {
                     continue;
                 }
             }
 
             let mut detached_kernel_driver = false;
-            if handle
-                .kernel_driver_active(interface)
-                .map_err(map_err)?
-            {
+            if handle.kernel_driver_active(interface).map_err(map_err)? {
                 handle.detach_kernel_driver(interface).map_err(map_err)?;
                 detached_kernel_driver = true;
             }
             handle.claim_interface(interface).map_err(|err| {
-                Error::Usb(format!(
-                    "cannot claim USBTMC interface {interface}: {err}"
-                ))
+                Error::Usb(format!("cannot claim USBTMC interface {interface}: {err}"))
             })?;
 
             return Ok(Self {
@@ -193,12 +184,8 @@ impl UsbHandle {
     /// Read the USBTMC status byte.
     pub fn read_status_byte(&self) -> Result<u8> {
         let mut buf = [0u8; 2];
-        let read = self.control_read(
-            USBTMC_READ_STATUS_BYTE,
-            0,
-            self.interface as u16,
-            &mut buf,
-        )?;
+        let read =
+            self.control_read(USBTMC_READ_STATUS_BYTE, 0, self.interface as u16, &mut buf)?;
         if read == 0 {
             return Err(Error::UsbTmc("empty status-byte response".to_string()));
         }
@@ -208,12 +195,7 @@ impl UsbHandle {
     /// Clear the device: `INITIATE_CLEAR` then `CHECK_CLEAR_STATUS`.
     pub fn device_clear(&self) -> Result<()> {
         let mut buf = [0u8; 1];
-        self.control_read(
-            USBTMC_INITIATE_CLEAR,
-            0,
-            self.interface as u16,
-            &mut buf,
-        )?;
+        self.control_read(USBTMC_INITIATE_CLEAR, 0, self.interface as u16, &mut buf)?;
         let mut status = [0u8; 2];
         self.control_read(
             USBTMC_CHECK_CLEAR_STATUS,
@@ -223,9 +205,7 @@ impl UsbHandle {
         )?;
         // Bit 0 is CLEAR_STATUS_PENDING; anything else means a stall happened.
         if status[0] & 0x01 != 0 {
-            return Err(Error::UsbTmc(
-                "device clear is still pending".to_string(),
-            ));
+            return Err(Error::UsbTmc("device clear is still pending".to_string()));
         }
         Ok(())
     }

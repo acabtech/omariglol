@@ -85,6 +85,19 @@ fn is_usable_measurement(value: &str) -> bool {
     }
 }
 
+/// Describe why a reply was not a usable reading.
+///
+/// Reports the instrument's original reply, not its expanded decimal form: the
+/// Rigol `9.9E37` sentinel would otherwise appear as a 38-digit integer.
+fn unusable_reading_error(reply: &str) -> String {
+    let reply = reply.trim();
+    if reply.is_empty() {
+        "no reading (empty reply)".to_string()
+    } else {
+        format!("no reading (instrument returned {reply})")
+    }
+}
+
 /// Render a reading as a plain decimal number.
 ///
 /// Instruments answer with scientific notation (`3.120000e+00`,
@@ -267,15 +280,15 @@ fn measure_one(instrument: &Instrument, command_override: Option<&str>) -> Measu
         result.value = Some(idn);
     } else {
         match session.query(&command) {
-            Ok(value) => {
-                let value = plain_number(&value);
+            Ok(reply) => {
+                let value = plain_number(&reply);
                 // Instruments answer an unavailable measurement with a
                 // sentinel (`9.9E37` on Rigol scopes). Do not surface that as a
                 // real reading, nor expand it into a 38-digit integer.
                 if is_usable_measurement(&value) {
                     result.value = Some(value);
                 } else {
-                    result.error = Some(format!("no reading (instrument returned {value})"));
+                    result.error = Some(unusable_reading_error(&reply));
                 }
             }
             Err(err) => result.error = Some(err.to_string()),
@@ -390,6 +403,14 @@ mod tests {
         assert!(!is_usable_measurement("9.9E37"));
         assert!(!is_usable_measurement(""));
         assert!(!is_usable_measurement("****"));
+    }
+
+    #[test]
+    fn test_unusable_reading_error_keeps_raw_reply() {
+        let message = unusable_reading_error("9.9E37");
+        assert!(message.contains("9.9E37"));
+        assert!(!message.contains("99000000000000000000000000000000000000"));
+        assert_eq!(unusable_reading_error("  "), "no reading (empty reply)");
     }
 
     #[test]

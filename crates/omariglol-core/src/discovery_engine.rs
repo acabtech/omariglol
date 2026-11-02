@@ -639,16 +639,8 @@ mod tests {
             300,
         ));
         assert_eq!(cache.len(), 2);
-        assert!(
-            cache
-                .get_by_key("usb:0x1AB1:0x04CE:AAA")
-                .is_some()
-        );
-        assert!(
-            cache
-                .get_by_key("usb:0x1AB1:0x04CE:BBB")
-                .is_some()
-        );
+        assert!(cache.get_by_key("usb:0x1AB1:0x04CE:AAA").is_some());
+        assert!(cache.get_by_key("usb:0x1AB1:0x04CE:BBB").is_some());
     }
 
     #[test]
@@ -776,6 +768,9 @@ mod tests {
             use_broadcast: false,
             use_mdns: false,
             scan_subnet: false,
+            // Keep the suite hermetic: an attached USBTMC instrument would
+            // otherwise be merged into `found` regardless of the static host.
+            use_usb: false,
             extra_hosts: vec![IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))],
             probe_timeout: Duration::from_millis(50),
             concurrency: 1,
@@ -803,6 +798,7 @@ mod tests {
             use_broadcast: false,
             use_mdns: false,
             scan_subnet: false,
+            use_usb: false,
             extra_hosts: vec![IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))],
             probe_timeout: Duration::from_millis(50),
             concurrency: 1,

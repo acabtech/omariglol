@@ -59,7 +59,7 @@ Three frontends over one protocol core:
 
 Full detail in [`docs/architecture.md`](docs/architecture.md).
 
-## Feature set (0.1.3)
+## Feature set (0.1.4)
 
 The CLI mirrors `lxi-tools`, with Python in place of Lua:
 
@@ -134,12 +134,12 @@ npm run tauri dev
 
 ## Release notes
 
-See [`CHANGELOG.md`](CHANGELOG.md) for the 0.1.3 changes, including USB
-discovery, non-disruptive portmapper detection and the `PMAP_DUMP` fix.
+See [`CHANGELOG.md`](CHANGELOG.md) for the 0.1.4 changes, including the
+parameter-query fix, USBTMC hardening and the broader 0.1.3 USB feature set.
 
 ## Roadmap
 
-- **0.1.x** — the feature set above; the current release is 0.1.3.
+- **0.1.x** — the feature set above; the current release is 0.1.4.
 - **0.2.0** — scripting depth: a saved snippet library and a headless daemon so
   scripts can share one instrument connection. Live charts, CSV logging and
   multi-instrument workspace scripts have already landed.

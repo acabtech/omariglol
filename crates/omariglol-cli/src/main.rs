@@ -632,15 +632,29 @@ fn open_session(
     Ok(Session::open(target)?)
 }
 
-/// Send one command. A query (ending in `?`) prints its response; a write does
-/// not. `--hex` renders the raw response bytes.
+/// Whether a SCPI command expects a response.
+///
+/// The query indicator belongs to the command header, not the end of the line:
+/// `:MEAS:VPP? CHAN1` is a query even though it ends in a parameter. Missing
+/// this leaves the response unread, which then poisons the next query on a
+/// stream transport such as USBTMC.
+fn is_query(command: &str) -> bool {
+    command.split(';').any(|part| {
+        part.split_whitespace()
+            .next()
+            .is_some_and(|header| header.contains('?'))
+    })
+}
+
+/// Send one command. A query prints its response; a write does not. `--hex`
+/// renders the raw response bytes.
 fn run_command(session: &mut Session, command: &str, hex: bool) -> anyhow::Result<()> {
     let command = command.trim();
     if command.is_empty() {
         return Ok(());
     }
 
-    if command.ends_with('?') {
+    if is_query(command) {
         let bytes = session.query_raw(command)?;
         if hex {
             println!("{}", to_hex(&bytes));
@@ -723,7 +737,10 @@ fn cmd_screenshot(args: ScreenshotArgs) -> anyhow::Result<()> {
             Ok(()) => return Ok(()),
             Err(err) => vlog!(1, "raw screenshot failed ({err}); retrying over VXI-11"),
         },
-        Err(err) => vlog!(1, "raw screenshot unavailable ({err}); retrying over VXI-11"),
+        Err(err) => vlog!(
+            1,
+            "raw screenshot unavailable ({err}); retrying over VXI-11"
+        ),
     }
 
     let target = Target::new(ip, Transport::Vxi11).with_timeout(timeout);
@@ -837,13 +854,11 @@ fn cmd_usb(args: UsbArgs) -> anyhow::Result<()> {
             if json {
                 println!("{}", serde_json::to_string_pretty(&devices)?);
             } else if devices.is_empty() {
-                println!(
-                    "no USB devices found (rebuild with the `usb` feature to enumerate)"
-                );
+                println!("no USB devices found (rebuild with the `usb` feature to enumerate)");
             } else {
                 println!(
-                    "{:<10} {:<4} {:<5} {:<6} {:<8} {}",
-                    "ID", "BUS", "ADDR", "IFACE", "DRIVER", "LABEL"
+                    "{:<10} {:<4} {:<5} {:<6} {:<8} LABEL",
+                    "ID", "BUS", "ADDR", "IFACE", "DRIVER"
                 );
                 for device in devices {
                     println!(
@@ -1378,4 +1393,34 @@ fn print_autoscale_table(report: &autoscale::AutoscaleReport) {
         report.failed(),
         report.elapsed_ms
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_query;
+
+    #[test]
+    fn test_query_detection_plain() {
+        assert!(is_query("*IDN?"));
+        assert!(is_query(":CHAN1:SCAL?"));
+    }
+
+    #[test]
+    fn test_query_detection_with_parameter() {
+        assert!(is_query(":MEAS:VPP? CHAN1"));
+        assert!(is_query(":MEAS:FREQ? CHAN1"));
+    }
+
+    #[test]
+    fn test_query_detection_compound() {
+        assert!(is_query(":CHAN1:SCAL?;:CHAN2:SCAL?"));
+        assert!(is_query(":CHAN1:DISP ON;:CHAN1:SCAL?"));
+    }
+
+    #[test]
+    fn test_write_detection() {
+        assert!(!is_query(":RUN"));
+        assert!(!is_query(":CHAN1:DISP ON"));
+        assert!(!is_query(":CHAN1:LABEL 'READY?'"));
+    }
 }

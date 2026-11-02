@@ -3,7 +3,7 @@
 <p class="tagline">LXI / SCPI instrument control, native to Omarchy.</p>
 <p class="lede">A native reimplementation of <a href="https://github.com/lxi-tools/lxi-tools">lxi-tools</a>: talk to oscilloscopes, power supplies, signal generators and DMMs over VXI-11, raw TCP and USB (USBTMC) — from a CLI, a themed desktop app, and the Omarchy shell itself. Organise them into workspaces and measure the whole rack at once.</p>
 <div class="badges">
-<span class="badge ok">v0.1.3</span>
+<span class="badge ok">v0.1.4</span>
 <span class="badge">Omarchy 4.x</span>
 <span class="badge">Rust + Tauri</span>
 <span class="badge">Python scripting</span>

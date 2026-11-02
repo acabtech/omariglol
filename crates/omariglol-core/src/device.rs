@@ -114,7 +114,10 @@ impl UsbSelector {
 
 fn parse_u16(token: &str) -> Option<u16> {
     let token = token.trim();
-    match token.strip_prefix("0x").or_else(|| token.strip_prefix("0X")) {
+    match token
+        .strip_prefix("0x")
+        .or_else(|| token.strip_prefix("0X"))
+    {
         Some(hex) => u16::from_str_radix(hex, 16).ok(),
         None => token.parse().ok(),
     }

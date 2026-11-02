@@ -22,7 +22,7 @@ set -uo pipefail
 orig_args=("$@")
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$here"
+cd "$here" || exit 1
 
 # --- Shared conventions -----------------------------------------------------
 target_user="${SUDO_USER:-${USER:-$(id -un)}}"

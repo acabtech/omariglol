@@ -14,6 +14,10 @@
 # See also: riglol usb list
 set -eu
 
+# Resolve the same binary the other examples use (repo bin/riglol, then PATH).
+# shellcheck source=common.sh
+. "$(dirname "$0")/common.sh"
+
 SELECTOR="${1:-usb:0x1AB1:0x04CE}"
 
 banner() {
@@ -21,10 +25,10 @@ banner() {
 }
 
 banner "usb enumerate"
-riglol usb list
+"$RIGLOL_BIN" usb list
 
 banner "identify over USBTMC"
-riglol scpi --usb "$SELECTOR" '*IDN?'
+"$RIGLOL_BIN" scpi --usb "$SELECTOR" '*IDN?'
 
 banner "read a measurement over USBTMC"
-riglol scpi --usb "$SELECTOR" ':MEAS:FREQ?'
+"$RIGLOL_BIN" scpi --usb "$SELECTOR" ':MEAS:FREQ?'

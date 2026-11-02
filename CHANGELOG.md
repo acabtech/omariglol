@@ -4,6 +4,40 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 semantic versioning.
 
+## [0.1.4] — 2026-11-02
+
+Release hardening after end-to-end testing of 0.1.3 on a Rigol DS1054Z over
+USBTMC.
+
+### Changed
+
+- Internal version references now consistently say 0.1.4.
+
+### Fixed
+
+- **SCPI queries with parameters.** `riglol scpi` decided whether to read a
+  response with `ends_with('?')`, so `:MEAS:VPP? CHAN1` was sent as a write. The
+  unread reply then desynchronised the next query on USBTMC. Query detection now
+  inspects the command header, including semicolon-separated compounds.
+- `measure` reporting the Rigol `9.9E37` sentinel as a 38-digit integer in its
+  error text; the original instrument reply is now preserved.
+- Static-host discovery tests were not hermetic: an attached USBTMC instrument
+  was merged into `found` even when the test only exercised network probes.
+- `examples/scpi/18_usb.sh` now resolves the repository's `bin/riglol` like the
+  other examples, and is executable.
+- ShellCheck warnings in `scripts/doctor.sh` and `scripts/install-usb-udev.sh`.
+- Formatting and Clippy lints that failed under current stable Rust.
+
+### Verified
+
+- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo test --workspace`, `cargo build --release --locked`.
+- USB round-trip coverage on a DS1054Z: parameter queries, interactive mode,
+  multi-query sessions, `measure`, `autoscale`, screenshots, `benchmark`,
+  `driver`, `usb list`, `discover --add`, and Python scripts.
+- `npm run build`, the Tauri shell `cargo check`, the documentation site build
+  and ShellCheck over all shell examples.
+
 ## [0.1.3] — 2026-10-30
 
 SCPI over USB (USBTMC) plus non-disruptive LXI discovery.

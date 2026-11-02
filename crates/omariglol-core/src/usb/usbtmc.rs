@@ -77,9 +77,7 @@ mod real {
             while !data.is_empty() {
                 match self.handle.write_bulk(data) {
                     Ok(0) => {
-                        return Err(Error::UsbTmc(
-                            "short bulk-out write (0 bytes)".to_string(),
-                        ));
+                        return Err(Error::UsbTmc("short bulk-out write (0 bytes)".to_string()));
                     }
                     Ok(written) => data = &data[written..],
                     Err(err) => return Err(err),
@@ -94,9 +92,7 @@ mod real {
             while filled < buf.len() {
                 match self.handle.read_bulk(&mut buf[filled..]) {
                     Ok(0) => {
-                        return Err(Error::UsbTmc(
-                            "short bulk-in read (0 bytes)".to_string(),
-                        ));
+                        return Err(Error::UsbTmc("short bulk-in read (0 bytes)".to_string()));
                     }
                     Ok(read) => filled += read,
                     Err(err) => return Err(err),
@@ -179,9 +175,8 @@ mod real {
                                 buf[0]
                             )));
                         }
-                        let declared = u32::from_le_bytes([
-                            buf[4], buf[5], buf[6], buf[7],
-                        ]) as usize;
+                        let declared =
+                            u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]) as usize;
                         payload_len = Some(declared);
                     }
                     if let Some(len) = payload_len
@@ -291,11 +286,7 @@ mod tests {
     fn test_bulk_out_header_layout() {
         let payload = b":RUN\n";
         let tag = 7u8;
-        let mut message = Vec::new();
-        message.push(MSG_DEV_DEP_MSG_OUT);
-        message.push(tag);
-        message.push(!tag);
-        message.push(0);
+        let mut message = vec![MSG_DEV_DEP_MSG_OUT, tag, !tag, 0];
         message.extend_from_slice(&(payload.len() as u32).to_le_bytes());
         message.push(EOM);
         message.extend_from_slice(&[0, 0, 0]);

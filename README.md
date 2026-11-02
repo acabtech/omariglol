@@ -3,8 +3,9 @@
 **A native-to-Omarchy reimplementation of [lxi-tools](https://github.com/lxi-tools/lxi-tools).**
 
 `omariglol` talks to LXI / SCPI test instruments — oscilloscopes, power supplies,
-signal generators, DMMs — over VXI-11, raw TCP and USB (USBTMC), and presents
-them through a CLI, a themed desktop app, and the Omarchy shell itself.
+signal generators, DMMs and vector network analyzers — over VXI-11, raw TCP and
+USB (USBTMC), and presents them through a CLI, a themed desktop app, and the
+Omarchy shell itself.
 
 The name is a portmanteau of *Omarchy* and *RigLOL*, but it is vendor-neutral:
 anything that speaks SCPI is fair game.
@@ -71,7 +72,7 @@ The CLI mirrors `lxi-tools`, with Python in place of Lua:
 | `riglol benchmark` | implemented | SCPI round-trip statistics, `--json`, `--usb` |
 | `riglol usb list` | implemented | Enumerate USB instruments and their USBTMC interface status |
 | `riglol run` | implemented | Execute a Python measurement script |
-| `riglol driver` | implemented | Show the named command surface for an instrument |
+| `riglol driver` | implemented | Show the named command surface for an instrument, including the NanoVNA-H USBFix profile |
 | `riglol workspace` | implemented | List, create and inspect saved workspaces |
 | `riglol measure` | implemented | Measure every instrument in a workspace in parallel |
 | `riglol autoscale` | implemented | Autoscale every capable instrument in a workspace |
@@ -131,6 +132,23 @@ npm run build
 # Desktop app
 npm run tauri dev
 ```
+
+## NanoVNA-H support
+
+A NanoVNA-H running the USBTMC firmware from
+[acabtech/NanoVNAUSBFix](https://github.com/acabtech/NanoVNAUSBFix) enumerates as
+a normal USBTMC instrument at `usb:0x0483:0x5740`. A matching driver profile is
+selected automatically from the `*IDN?` reply and exposes sweep, acquisition,
+frequency, S11/S21 data and the stock-shell escape hatch:
+
+```bash
+riglol scpi --usb usb:0x0483:0x5740 '*IDN?'
+riglol driver --usb usb:0x0483:0x5740
+examples/scpi/19_nanovna.sh
+```
+
+Screenshots are not available over USBTMC; use the CDC interface for those. See
+[`docs/nanovna.md`](docs/nanovna.md) for the full command reference.
 
 ## Release notes
 

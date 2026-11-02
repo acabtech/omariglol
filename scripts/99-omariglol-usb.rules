@@ -16,4 +16,8 @@
 SUBSYSTEM=="usb", ATTR{idVendor}=="1ab1", ATTR{idProduct}=="04ce", MODE="0660", GROUP="uucp", TAG+="uaccess"
 
 # Generic USBTMC instruments: interface class 0xFE, subclass 0x03.
-SUBSYSTEM=="usb", ENV{ID_USB_INTERFACES}=="*:fe03:*", MODE="0660", GROUP="uucp", TAG+="uaccess"
+#
+# ID_USB_INTERFACES encodes each interface as ccsspp, so a USBTMC-USB488
+# interface shows up as ":fe0301:", not ":fe03:". Match the class/subclass
+# prefix and leave the protocol byte free.
+SUBSYSTEM=="usb", ENV{ID_USB_INTERFACES}=="*:fe03*", MODE="0660", GROUP="uucp", TAG+="uaccess"

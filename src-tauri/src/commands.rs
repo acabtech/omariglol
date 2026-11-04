@@ -32,20 +32,20 @@ use omariglol_core::benchmark::{self, BenchmarkOptions, BenchmarkReport};
 use omariglol_core::connection::Connection;
 use omariglol_core::device::{Device, Target, Transport};
 use omariglol_core::discovery;
+use omariglol_core::discovery_engine::DEFAULT_TTL_SECS;
 use omariglol_core::discovery_engine::{
     CachedInstrument, DiscoveryEngine, DiscoveryEvent, DiscoveryOptions, DiscoveryReport,
 };
 use omariglol_core::driver::InstrumentDriver;
-use omariglol_core::netconfig::{self, NetworkConfig};
 use omariglol_core::error::Error;
 use omariglol_core::instrument::{Instrument, InstrumentId, InstrumentState};
-use omariglol_core::discovery_engine::DEFAULT_TTL_SECS;
+use omariglol_core::netconfig::{self, NetworkConfig};
 use omariglol_core::preset::Preset;
 use omariglol_core::rule::Rule;
 use omariglol_core::screenshot::{self, ImageFormat, Screenshot};
 use omariglol_core::timeline::{TimelineEvent, TimelineEventKind};
 use omariglol_core::trigger::Trigger;
-use omariglol_core::workspace::{now_millis, Workspace, WorkspaceId, WorkspaceManager};
+use omariglol_core::workspace::{Workspace, WorkspaceId, WorkspaceManager, now_millis};
 use omariglol_script::{ScriptEngine, ScriptOptions};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
@@ -288,10 +288,7 @@ pub struct InstrumentView {
 
 impl From<&Instrument> for InstrumentView {
     fn from(instrument: &Instrument) -> Self {
-        let driver = instrument
-            .idn
-            .as_deref()
-            .map(InstrumentDriver::from_idn);
+        let driver = instrument.idn.as_deref().map(InstrumentDriver::from_idn);
         let (instrument_type, glyph) = match &driver {
             Some(driver) => (
                 driver.instrument_type.label().to_string(),
@@ -610,7 +607,9 @@ pub async fn workspace_create(
 
 /// List all saved workspaces with summary metadata.
 #[tauri::command]
-pub async fn workspace_list(state: State<'_, WorkspaceState>) -> CommandResult<Vec<WorkspaceSummary>> {
+pub async fn workspace_list(
+    state: State<'_, WorkspaceState>,
+) -> CommandResult<Vec<WorkspaceSummary>> {
     let state = state.inner().clone();
     let manager = state.manager.lock().unwrap();
     let active = manager.active_id().cloned();
@@ -649,18 +648,15 @@ pub async fn workspace_open(
 pub async fn workspace_save(state: State<'_, WorkspaceState>) -> CommandResult<()> {
     let state = state.inner().clone();
     let manager = state.manager.lock().unwrap();
-    manager.save_active().map_err(|e| {
-        CommandError::new("io", format!("could not save the workspace: {e}"))
-    })?;
+    manager
+        .save_active()
+        .map_err(|e| CommandError::new("io", format!("could not save the workspace: {e}")))?;
     Ok(())
 }
 
 /// Delete a workspace and all its data.
 #[tauri::command]
-pub async fn workspace_delete(
-    state: State<'_, WorkspaceState>,
-    id: String,
-) -> CommandResult<()> {
+pub async fn workspace_delete(state: State<'_, WorkspaceState>, id: String) -> CommandResult<()> {
     let state = state.inner().clone();
     let mut manager = state.manager.lock().unwrap();
     if !manager.delete(&WorkspaceId(id)) {
@@ -715,7 +711,9 @@ pub async fn workspace_add_instrument(
         instrument.config.port = request.port;
         instrument.config.timeout_secs = request.timeout_secs;
     }
-    let instrument = workspace.instrument(&id).ok_or_else(|| no_instrument(&id))?;
+    let instrument = workspace
+        .instrument(&id)
+        .ok_or_else(|| no_instrument(&id))?;
     Ok(InstrumentView::from(instrument))
 }
 
@@ -769,7 +767,9 @@ pub async fn instrument_connect(
     let (target, workspace_id) = {
         let manager = state.manager.lock().unwrap();
         let workspace = manager.active().ok_or_else(no_workspace)?;
-        let instrument = workspace.instrument(&id).ok_or_else(|| no_instrument(&id))?;
+        let instrument = workspace
+            .instrument(&id)
+            .ok_or_else(|| no_instrument(&id))?;
         (target_for(instrument), workspace.id.to_string())
     };
 
@@ -786,7 +786,11 @@ pub async fn instrument_connect(
 
     match result {
         Ok((connection, idn)) => {
-            state.sessions.lock().unwrap().insert(id.clone(), connection);
+            state
+                .sessions
+                .lock()
+                .unwrap()
+                .insert(id.clone(), connection);
             let now = now_millis();
             let mut manager = state.manager.lock().unwrap();
             if let Some(workspace) = manager.active_mut() {
@@ -818,7 +822,9 @@ pub async fn instrument_connect(
             );
             let manager = state.manager.lock().unwrap();
             let workspace = manager.active().ok_or_else(no_workspace)?;
-            let instrument = workspace.instrument(&id).ok_or_else(|| no_instrument(&id))?;
+            let instrument = workspace
+                .instrument(&id)
+                .ok_or_else(|| no_instrument(&id))?;
             Ok(InstrumentView::from(instrument))
         }
         Err(err) => {
@@ -945,11 +951,7 @@ pub async fn instrument_write(
     .await
     .map_err(join_error)??;
 
-    state.record_timeline(
-        Some(id),
-        TimelineEventKind::Command,
-        command_for_timeline,
-    );
+    state.record_timeline(Some(id), TimelineEventKind::Command, command_for_timeline);
     Ok(())
 }
 
@@ -967,7 +969,9 @@ pub async fn instrument_driver(
     let id = InstrumentId(instrument_id);
     let manager = state.manager.lock().unwrap();
     let workspace = manager.active().ok_or_else(no_workspace)?;
-    let instrument = workspace.instrument(&id).ok_or_else(|| no_instrument(&id))?;
+    let instrument = workspace
+        .instrument(&id)
+        .ok_or_else(|| no_instrument(&id))?;
     let idn = instrument.idn.clone().unwrap_or_default();
     Ok(InstrumentDriver::from_idn(&idn))
 }
@@ -991,7 +995,9 @@ pub async fn instrument_run_command(
     let (scpi, is_query) = {
         let manager = inner.manager.lock().unwrap();
         let workspace = manager.active().ok_or_else(no_workspace)?;
-        let instrument = workspace.instrument(&id).ok_or_else(|| no_instrument(&id))?;
+        let instrument = workspace
+            .instrument(&id)
+            .ok_or_else(|| no_instrument(&id))?;
         let idn = instrument.idn.clone().unwrap_or_default();
         let driver = InstrumentDriver::from_idn(&idn);
         let command = driver
@@ -1299,7 +1305,11 @@ pub async fn preset_apply(
     state.record_timeline(
         None,
         TimelineEventKind::Preset,
-        format!("applied preset '{}' ({} steps)", plan.preset_name, plan.len()),
+        format!(
+            "applied preset '{}' ({} steps)",
+            plan.preset_name,
+            plan.len()
+        ),
     );
 
     let _ = app.emit(
@@ -1418,10 +1428,7 @@ pub async fn scpi_query(
 
 /// Send a SCPI command to the first connected instrument.
 #[tauri::command]
-pub async fn scpi_write(
-    state: State<'_, WorkspaceState>,
-    command: String,
-) -> CommandResult<()> {
+pub async fn scpi_write(state: State<'_, WorkspaceState>, command: String) -> CommandResult<()> {
     let id = first_connected(&state)?;
     instrument_write(state, id.to_string(), command).await
 }
@@ -1481,21 +1488,29 @@ pub async fn capture_screenshot(
         None => first_connected(&state)?,
     };
 
-    let (address, timeout, idn) = {
+    let (device, transport_kind, port, timeout) = {
         let manager = state.manager.lock().unwrap();
         let workspace = manager.active().ok_or_else(no_workspace)?;
-        let instrument = workspace.instrument(&id).ok_or_else(|| no_instrument(&id))?;
+        let instrument = workspace
+            .instrument(&id)
+            .ok_or_else(|| no_instrument(&id))?;
         (
-            instrument.device.address,
+            instrument.device.clone(),
+            instrument.config.transport,
+            instrument.config.port,
             instrument.config.timeout(),
-            instrument.idn.clone().unwrap_or_default(),
         )
     };
 
     let command = request.command;
     tauri::async_runtime::spawn_blocking(move || {
-        let mut transport = screenshot::open_default_transport(address, timeout)?;
-        let shot = screenshot::capture(transport.as_mut(), &idn, command.as_deref())?;
+        let shot = screenshot::capture_from_device(
+            &device,
+            transport_kind,
+            port,
+            timeout,
+            command.as_deref(),
+        )?;
         Ok(ScreenshotResponse::from(shot))
     })
     .await
@@ -1705,9 +1720,8 @@ mod tests {
 
     #[test]
     fn test_instrument_view_from_instrument() {
-        let mut instrument = Instrument::from_device(Device::manual(
-            "192.168.1.50".parse::<IpAddr>().unwrap(),
-        ));
+        let mut instrument =
+            Instrument::from_device(Device::manual("192.168.1.50".parse::<IpAddr>().unwrap()));
         instrument.mark_connected("RIGOL TECHNOLOGIES,DS1054Z,SN,1.0".to_string(), 1);
         let view = InstrumentView::from(&instrument);
         assert_eq!(view.instrument_type, "oscilloscope");
@@ -1717,9 +1731,8 @@ mod tests {
 
     #[test]
     fn test_target_for_uses_config() {
-        let mut instrument = Instrument::from_device(Device::manual(
-            "192.168.1.50".parse::<IpAddr>().unwrap(),
-        ));
+        let mut instrument =
+            Instrument::from_device(Device::manual("192.168.1.50".parse::<IpAddr>().unwrap()));
         instrument.config.transport = Transport::Raw;
         instrument.config.port = Some(5555);
         instrument.config.timeout_secs = 9;

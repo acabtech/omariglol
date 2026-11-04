@@ -250,11 +250,9 @@ install_plugin() {
   local dest="$target_home/.config/omarchy/plugins/tech.alatcerdas.omariglol"
   local section="${OMARIGLOL_PLUGIN_SECTION:-right}"
 
-  # `omarchy plugin add <git-url>` clones the repository and validates
-  # manifest.json *at the clone root*. Our plugin lives in omarchy/plugin/ of
-  # the umbrella repository, so there is no git URL that satisfies it; the
-  # plugins directory is omarchy's other supported discovery path, so install
-  # the tree there and enable it.
+  # The repository root has a manifest for `omarchy plugin add`, but the
+  # installer deliberately copies the plugin tree directly: it must also work
+  # from a release bundle and must not depend on omarchy's clone cache.
   log "installing the shell plugin to $dest"
   mkdir -p "$(dirname "$dest")"
   # Replace the plugin tree wholesale so a newer version's dropped files do not

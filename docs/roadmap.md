@@ -1,10 +1,11 @@
 # Roadmap
 
-## 0.1.4 → 0.1.6 — SCPI over USB
+## 0.1.4 → 0.1.7 — SCPI over USB
 
 USB work is pulled forward out of 0.2.0. 0.1.3 delivered the initial DS1054Z
-transport; 0.1.4 is the hardening release that followed end-to-end testing. The
-full plan is in [`plans/0.1.3-usb-scpi.md`](../plans/0.1.3-usb-scpi.md).
+transport; 0.1.4 is the hardening release that followed end-to-end testing and
+0.1.5 is a patch release for the plugin manifest and transport fixes. The full
+plan is in [`plans/0.1.3-usb-scpi.md`](../plans/0.1.3-usb-scpi.md).
 
 ### 0.1.3 — Rigol DS1054Z over USBTMC (delivered)
 
@@ -27,12 +28,19 @@ full plan is in [`plans/0.1.3-usb-scpi.md`](../plans/0.1.3-usb-scpi.md).
 - [ ] Hotplug events
 - [x] USB merged into discovery and the Discovery panel
 
-### 0.1.5 — SUMP capture
+### 0.1.5 — plugin install and transport fixes
+
+- [x] Repository-root plugin manifest for `omarchy plugin add`
+- [x] Transport-aware screenshot IPC (USB and VXI-11)
+- [x] Parametrised SCPI query detection in the console
+- [x] Workspace reconnect preserves the USB selector and device name
+
+### 0.1.6 — SUMP capture
 
 - [ ] `usb::sump` for the Saleae clone
 - [ ] `capture` / `waveform` model and `riglol capture`
 
-### 0.1.6 — all targets over USB
+### 0.1.7 — all targets over USB
 
 - [ ] NI USB-6001 and Sipeed SLogic16U3 stubs
 - [ ] Every listed device reachable (capture or a clear not-yet-implemented error)

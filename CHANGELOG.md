@@ -6,6 +6,11 @@ semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.5] — 2026-11-04
+
+Patch release fixing plugin installation and the three reported transport and
+query bugs.
+
 ### Added
 
 - NanoVNA USBFix driver profile. A NanoVNA-H running the USBTMC firmware from
@@ -13,6 +18,26 @@ semantic versioning.
   classified as a vector network analyzer and exposes sweep, acquisition,
   frequency, S11/S21 data and stock-shell escape-hatch operations.
 - `examples/scpi/19_nanovna.sh` and `docs/nanovna.md`.
+- A repository-root `manifest.json` whose entry point is
+  `omarchy/plugin/BarWidget.qml`, so `omarchy plugin add` accepts both the git
+  URL and a checkout path.
+
+### Fixed
+
+- **Screenshot IPC ignored the instrument's transport.** The desktop app always
+  dialed raw TCP at the stored address. It now calls `capture_from_device`, so
+  USB instruments open over USBTMC, VXI-11-only instruments stay on VXI-11, and
+  the `*IDN?` is queried directly instead of relying on a cached value.
+- **Parametrised SCPI queries in the console.** The frontend now inspects the
+  command header, matching the CLI, so `:MEAS:VPP? CHAN1` is sent as a query
+  instead of a write and its reply cannot poison the next query.
+- **Workspace reconnect dropped USB selectors.** `Workspace::connect` now uses
+  `Target::from_device`, preserving the USB selector and VXI-11 device name.
+
+### Changed
+
+- Documentation now describes installing the shell plugin from the repository
+  root or directly from `omarchy/plugin/`.
 
 ## [0.1.4] — 2026-11-02
 

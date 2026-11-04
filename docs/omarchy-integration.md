@@ -105,12 +105,23 @@ instruments the last run measured, with a panel that lists the workspace's
 instruments, detects instruments on the network, and fires a simultaneous
 measurement of all of them.
 
+The repository root also ships a `manifest.json` whose `barWidget` entry point
+points at `omarchy/plugin/BarWidget.qml`. That is what makes the plugin
+installable both as a git URL and as a checkout directory: Omarchy requires a
+manifest at the root of whatever it clones or adds.
+
 Install with:
 
 ```bash
-omarchy plugin add /path/to/omariglol/omarchy/plugin --enable
-# or, once the repo is public:
+omarchy plugin add /path/to/omariglol --enable
 omarchy plugin add https://github.com/acabtech/omariglol.git --enable
+```
+
+Adding the plugin directory directly also works, because it carries its own
+manifest:
+
+```bash
+omarchy plugin add /path/to/omariglol/omarchy/plugin --enable
 ```
 
 The panel has four things:

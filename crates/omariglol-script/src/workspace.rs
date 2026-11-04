@@ -515,7 +515,7 @@ impl Workspace {
             .ok_or_else(|| PyKeyError::new_err(format!("no instrument '{name}'")))?;
         let target = {
             let instrument = data.inner.instrument(&id).expect("resolved above");
-            let mut target = Target::new(instrument.device.address, instrument.config.transport)
+            let mut target = Target::from_device(&instrument.device, instrument.config.transport)
                 .with_timeout(instrument.config.timeout());
             if let Some(port) = instrument.config.port {
                 target = target.with_port(port);

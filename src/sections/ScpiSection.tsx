@@ -1,9 +1,10 @@
 /**
  * SCPI console (UX journey §4.2, §6.2; concepts.md §2.5).
  *
- * A command console bound to the selected instrument. Commands ending in `?`
- * are queries; everything else is a write. History recall and a hex toggle for
- * binary responses are preserved from 0.1.0.
+ * A command console bound to the selected instrument. Commands whose header
+ * contains `?` are queries, including parametrised forms such as
+ * `:MEAS:VPP? CHAN1`; everything else is a write. History recall and a hex
+ * toggle for binary responses are preserved from 0.1.0.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -15,7 +16,7 @@ import { Button, ConnectPrompt } from "@/components/ui";
 import * as api from "@/lib/api";
 import { toCommandError } from "@/lib/api";
 import { translateError } from "@/lib/errors";
-import { byteLength, hasNonPrintable, toHexDump } from "@/lib/format";
+import { byteLength, hasNonPrintable, isQuery, toHexDump } from "@/lib/format";
 import type { PanelProps } from "@/lib/types";
 import { useWorkspace } from "@/state/workspace";
 
@@ -65,7 +66,7 @@ export default function ScpiSection({ onGoToTopology }: PanelProps) {
     setSending(true);
 
     try {
-      if (command.endsWith("?")) {
+      if (isQuery(command)) {
         const response = await api.instrumentQuery(selected.id, command);
         if (hex) {
           pushLine(toHexDump(response));

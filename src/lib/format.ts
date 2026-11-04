@@ -48,6 +48,21 @@ export function idnLabel(idn: string): string {
   return first.trim().replace(/[^A-Za-z0-9._-]+/g, "-") || "instrument";
 }
 
+/**
+ * True when a SCPI command expects a response.
+ *
+ * The query indicator belongs to the command header, not the end of the line:
+ * `:MEAS:VPP? CHAN1` is a query even though it ends in a parameter. Inspecting
+ * only the final character would send that as a write and leave the reply
+ * unread, which desynchronises the next query on a stream transport.
+ */
+export function isQuery(command: string): boolean {
+  return command.split(";").some((part) => {
+    const header = part.trim().split(/\s+/, 1)[0];
+    return header?.includes("?") === true;
+  });
+}
+
 /** True when a string contains characters that are not printable ASCII. */
 export function hasNonPrintable(text: string): boolean {
   // eslint-disable-next-line no-control-regex

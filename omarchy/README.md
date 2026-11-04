@@ -51,11 +51,17 @@ Use [`scripts/install.sh`](../scripts/install.sh), which copies the plugin into
 scripts/install.sh --plugin-only
 ```
 
-`omarchy plugin add <git-url>` is not applicable here: it clones a repo and
-requires `manifest.json` at the clone root, while this plugin lives in
-`omarchy/plugin/` of the umbrella repository. A directory dropped into
-`~/.config/omarchy/plugins/` is the supported path for a plugin shipped inside
-a larger project.
+You can also install it with Omarchy's plugin manager. The repository root has
+a `manifest.json` that points at `omarchy/plugin/BarWidget.qml`, so both the
+repository URL and a local checkout work:
+
+```bash
+omarchy plugin add https://github.com/acabtech/omariglol.git --enable
+omarchy plugin add /path/to/omariglol --enable
+```
+
+The plugin directory itself has a manifest too, so adding
+`/path/to/omariglol/omarchy/plugin` directly is equally valid.
 
 A bar widget also needs a **section**; enabling it without one leaves it
 enabled but invisible. If you enable it by hand:

@@ -1,3 +1,5 @@
+import type { UsbSelector } from "@/lib/types";
+
 /**
  * Presentation helpers.
  *
@@ -40,6 +42,22 @@ export function fileTimestamp(date = new Date()): string {
     `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}` +
     `-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
   );
+}
+
+/**
+ * Format a USB selector in Rust's `usb:0xVVVV:0xPPPP[:SERIAL|BUS.ADDR]` form.
+ *
+ * This is the address string the workspace expects for a `usb` transport.
+ */
+export function formatUsbSelector(selector: UsbSelector): string {
+  const hex = (n: number) => n.toString(16).toUpperCase().padStart(4, "0");
+  let text = `usb:0x${hex(selector.vendor)}:0x${hex(selector.product)}`;
+  if (selector.serial) {
+    text += `:${selector.serial}`;
+  } else if (selector.bus != null && selector.address != null) {
+    text += `:${selector.bus}.${selector.address}`;
+  }
+  return text;
 }
 
 /** Turn an `*IDN?` string into a short, filesystem-safe label. */

@@ -9,8 +9,10 @@
 /** How an instrument was located. Mirrors `DiscoveryMethod` in Rust. */
 export type DiscoveryMethod =
   | "vxi11-broadcast"
+  | "vxi11-portmap"
   | "mdns"
   | "scpi-tcp"
+  | "usb"
   | "manual";
 
 /** Which transport to use. Mirrors `Transport` in Rust. */
@@ -24,9 +26,19 @@ export type InstrumentState =
   | "error"
   | "offline";
 
+/** How to find a USB instrument. Mirrors `UsbSelector` in Rust. */
+export interface UsbSelector {
+  vendor: number;
+  product: number;
+  serial?: string;
+  bus?: number;
+  address?: number;
+}
+
 /** A discovered or manually configured LXI instrument. */
 export interface Device {
   address: string;
+  usb?: UsbSelector;
   hostname?: string;
   vxi11_port?: number;
   raw_port?: number;

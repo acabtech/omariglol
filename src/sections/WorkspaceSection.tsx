@@ -28,6 +28,7 @@ export default function WorkspaceSection() {
     clearError,
     createWorkspace,
     openWorkspace,
+    saveWorkspace,
     deleteWorkspace,
     connectInstrument,
     disconnectInstrument,
@@ -36,6 +37,7 @@ export default function WorkspaceSection() {
 
   const [newName, setNewName] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const onCreate = useCallback(async () => {
     const name = newName.trim();
@@ -43,6 +45,13 @@ export default function WorkspaceSection() {
     await createWorkspace(name);
     setNewName("");
   }, [createWorkspace, newName]);
+
+  const onSave = useCallback(async () => {
+    if (!workspace) return;
+    setSaving(true);
+    await saveWorkspace();
+    setSaving(false);
+  }, [saveWorkspace, workspace]);
 
   const onConnect = useCallback(
     async (id: string) => {
@@ -70,7 +79,7 @@ export default function WorkspaceSection() {
       title="Workspace"
       description="The unit of work: a named collection of instruments and automation."
       actions={
-        <Button onClick={() => void openWorkspace(workspace?.id ?? "")} disabled={!workspace}>
+        <Button onClick={() => void onSave()} busy={saving} disabled={!workspace}>
           Save
         </Button>
       }

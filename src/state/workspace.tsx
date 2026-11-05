@@ -59,6 +59,8 @@ interface WorkspaceContextValue {
   createWorkspace: (name: string) => Promise<void>;
   /** Open a workspace by id. */
   openWorkspace: (id: string) => Promise<void>;
+  /** Persist the active workspace to disk. */
+  saveWorkspace: () => Promise<void>;
   /** Delete a workspace by id. */
   deleteWorkspace: (id: string) => Promise<void>;
   /** Add an instrument to the active workspace. */
@@ -206,6 +208,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [refreshTimeline],
   );
 
+  const saveWorkspace = useCallback(async () => {
+    try {
+      await api.workspaceSave();
+    } catch (err) {
+      setError(toCommandError(err));
+    }
+  }, []);
+
   const deleteWorkspace = useCallback(
     async (id: string) => {
       try {
@@ -320,6 +330,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       refresh,
       createWorkspace,
       openWorkspace,
+      saveWorkspace,
       deleteWorkspace,
       addInstrument,
       removeInstrument,
@@ -345,6 +356,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       refresh,
       createWorkspace,
       openWorkspace,
+      saveWorkspace,
       deleteWorkspace,
       addInstrument,
       removeInstrument,

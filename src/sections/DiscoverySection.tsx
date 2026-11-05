@@ -13,6 +13,7 @@ import { Checkbox, Field, NumberInput, Select, TextInput } from "@/components/Fi
 import { Section } from "@/components/Section";
 import { Alert, Badge, Button, EmptyState } from "@/components/ui";
 import { translateError } from "@/lib/errors";
+import { formatUsbSelector } from "@/lib/format";
 import type { Transport } from "@/lib/types";
 import { useWorkspace } from "@/state/workspace";
 
@@ -236,15 +237,22 @@ export default function DiscoverySection() {
               </thead>
               <tbody>
                 {cached.map((entry) => {
-                  const transport: Transport =
-                    entry.device.vxi11_port != null ? "vxi11" : "raw";
+                  const usb = entry.device.usb;
+                  const address = usb
+                    ? formatUsbSelector(usb)
+                    : entry.device.address;
+                  const transport: Transport = usb
+                    ? "usb"
+                    : entry.device.vxi11_port != null
+                      ? "vxi11"
+                      : "raw";
                   const port =
                     transport === "vxi11"
                       ? entry.device.vxi11_port
                       : entry.device.raw_port;
                   return (
-                    <tr key={entry.device.address}>
-                      <td className="mono">{entry.device.address}</td>
+                    <tr key={address}>
+                      <td className="mono">{address}</td>
                       <td>{entry.model || "—"}</td>
                       <td className="mono">{entry.serial || "—"}</td>
                       <td className="mono">{entry.vlan ?? "—"}</td>
@@ -254,7 +262,11 @@ export default function DiscoverySection() {
                       <td>
                         <Button
                           onClick={() =>
-                            addCached(entry.device.address, transport, port)
+                            addCached(
+                              address,
+                              transport,
+                              transport === "usb" ? undefined : port,
+                            )
                           }
                         >
                           Add

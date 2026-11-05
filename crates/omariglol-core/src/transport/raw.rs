@@ -95,6 +95,21 @@ impl RawTransport {
         }
         Some(line)
     }
+
+    /// Consume the line terminator that follows a definite-length block.
+    ///
+    /// A block's declared length covers only its payload, but instruments still
+    /// terminate the response with `\n` (or `\r\n`). Leaving that terminator in
+    /// `pending` would make the next `receive` return an empty line and push the
+    /// real reply one call late.
+    fn consume_block_terminator(&mut self) {
+        if self.pending.first() == Some(&b'\r') {
+            self.pending.remove(0);
+        }
+        if self.pending.first() == Some(&TERMINATOR) {
+            self.pending.remove(0);
+        }
+    }
 }
 
 impl ScpiTransport for RawTransport {
@@ -132,7 +147,9 @@ impl ScpiTransport for RawTransport {
                     }
                 }
                 let take = total.min(self.pending.len());
-                return Ok(self.pending.drain(..take).collect());
+                let block: Vec<u8> = self.pending.drain(..take).collect();
+                self.consume_block_terminator();
+                return Ok(block);
             }
 
             // A complete newline-terminated line already buffered?
@@ -320,6 +337,35 @@ mod tests {
         });
         let mut transport = connect_to(addr);
         assert_eq!(transport.receive().unwrap(), expected);
+        let _ = handle.join();
+    }
+
+    #[test]
+    fn test_raw_block_terminator_does_not_desync_next_query() {
+        // An instrument answers `#15hello\n`, then the next query's text reply.
+        // The trailing `\n` must be consumed with the block, not returned as an
+        // empty line ahead of the real response.
+        let (addr, handle) = spawn_server(|mut s| {
+            let _ = s.write_all(b"#15hello\n*IDN? reply\n");
+            let _ = s.flush();
+            thread::sleep(Duration::from_millis(200));
+        });
+        let mut transport = connect_to(addr);
+        assert_eq!(transport.receive().unwrap(), b"#15hello");
+        assert_eq!(transport.receive().unwrap(), b"*IDN? reply");
+        let _ = handle.join();
+    }
+
+    #[test]
+    fn test_raw_block_crlf_terminator_consumed() {
+        let (addr, handle) = spawn_server(|mut s| {
+            let _ = s.write_all(b"#15hello\r\nnext\r\n");
+            let _ = s.flush();
+            thread::sleep(Duration::from_millis(200));
+        });
+        let mut transport = connect_to(addr);
+        assert_eq!(transport.receive().unwrap(), b"#15hello");
+        assert_eq!(transport.receive().unwrap(), b"next");
         let _ = handle.join();
     }
 

@@ -179,17 +179,28 @@ pub fn parse_colors_toml(text: &str) -> Option<OmarchyPalette> {
     let mut palette = builtin_palette();
     palette.source = PaletteSource::OmarchyColors;
 
-    let get = |key: &str| {
+    // Our generated template nests colours under `[colors]`, background shades
+    // under `[surfaces]`, and the ANSI palette under `[ansi]`, while Omarchy's
+    // live `colors.toml` keeps everything at the document root. Look up the
+    // root first, then the template's section, so both layouts resolve.
+    let get = |key: &str, section: &str| {
         table
             .get(key)
             .and_then(|value| value.as_str())
+            .or_else(|| {
+                table
+                    .get(section)
+                    .and_then(|value| value.as_table())
+                    .and_then(|section| section.get(key))
+                    .and_then(|value| value.as_str())
+            })
             .map(str::to_string)
     };
 
     macro_rules! fill {
         ($($field:ident),* $(,)?) => {
             $(
-                if let Some(value) = get(stringify!($field)) {
+                if let Some(value) = get(stringify!($field), "colors") {
                     palette.$field = value;
                 }
             )*
@@ -220,19 +231,21 @@ pub fn parse_colors_toml(text: &str) -> Option<OmarchyPalette> {
     );
 
     for key in ["dark_background", "darker_background", "lighter_background"] {
-        if let Some(value) = get(key) {
+        if let Some(value) = get(key, "surfaces") {
             palette.background_shades.insert(key.to_string(), value);
         }
     }
 
     for (index, slot) in palette.ansi.iter_mut().enumerate() {
-        if let Some(value) = get(&format!("color{index}")) {
+        if let Some(value) = get(&format!("color{index}"), "ansi") {
             *slot = value;
         }
     }
 
     if let Some(value) = table.get("is_light").and_then(|value| value.as_bool()) {
         palette.is_light = value;
+    } else if let Some(value) = table.get("mode").and_then(|value| value.as_str()) {
+        palette.is_light = value.eq_ignore_ascii_case("light");
     }
 
     Some(palette)
@@ -365,6 +378,36 @@ mod tests {
         // A key the file omits keeps the built-in default.
         assert_eq!(palette.foreground, builtin_palette().foreground);
         assert_eq!(palette.source, PaletteSource::OmarchyColors);
+    }
+
+    #[test]
+    fn test_parse_colors_toml_nested_template_sections() {
+        // Shape of the file rendered from `omariglol-theme.toml.tpl`.
+        let text = r##"
+            mode = "light"
+
+            [colors]
+            background = "#000000"
+            accent = "#ff0000"
+            bright_foreground = "#ffffff"
+
+            [surfaces]
+            dark_background = "#010101"
+
+            [ansi]
+            color3 = "#123456"
+        "##;
+        let palette = parse_colors_toml(text).unwrap();
+        assert_eq!(palette.background, "#000000");
+        assert_eq!(palette.accent, "#ff0000");
+        assert_eq!(palette.bright_foreground, "#ffffff");
+        assert_eq!(palette.ansi[3], "#123456");
+        assert_eq!(
+            palette.background_shades.get("dark_background"),
+            Some(&"#010101".to_string())
+        );
+        assert!(palette.is_light);
+        assert_ne!(palette.background, builtin_palette().background);
     }
 
     #[test]

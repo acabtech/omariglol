@@ -538,17 +538,20 @@ pub fn probe_vxi11_tcp(address: IpAddr, timeout: Duration) -> Option<Device> {
     Some(device)
 }
 
-/// Scan a list of hosts in parallel, calling `on_found` as each answers.
+/// Scan a list of hosts in parallel, calling `on_found` as each answers and
+/// `on_probe` once for every host after its probe completes.
 ///
 /// `concurrency` worker threads pull hosts from a shared queue, so a `/24`
 /// completes in roughly `hosts / concurrency * timeout` rather than the serial
-/// product. `on_found` is invoked from worker threads and must be `Send + Sync`.
+/// product. `on_found` and `on_probe` are invoked from worker threads and must
+/// be `Send + Sync`.
 pub fn scan_hosts(
     hosts: &[Ipv4Addr],
     ports: &[u16],
     timeout: Duration,
     concurrency: usize,
     on_found: impl Fn(&ProbeResult) + Send + Sync + 'static,
+    on_probe: impl Fn(&Ipv4Addr) + Send + Sync + 'static,
 ) -> Vec<ProbeResult> {
     use std::collections::VecDeque;
     use std::sync::{Arc, Mutex};
@@ -561,6 +564,7 @@ pub fn scan_hosts(
     let queue = Arc::new(Mutex::new(hosts.iter().copied().collect::<VecDeque<_>>()));
     let results = Arc::new(Mutex::new(Vec::new()));
     let on_found = Arc::new(on_found);
+    let on_probe = Arc::new(on_probe);
     let ports = ports.to_vec();
     let workers = concurrency.max(1).min(hosts.len());
 
@@ -569,6 +573,7 @@ pub fn scan_hosts(
         let queue = Arc::clone(&queue);
         let results = Arc::clone(&results);
         let on_found = Arc::clone(&on_found);
+        let on_probe = Arc::clone(&on_probe);
         let ports = ports.clone();
         handles.push(thread::spawn(move || {
             loop {
@@ -591,6 +596,9 @@ pub fn scan_hosts(
                     on_found(&result);
                     results.lock().unwrap().push(result);
                 }
+                // Report the host itself, whether or not it answered, so
+                // progress tracks probes rather than discoveries.
+                on_probe(&host);
             }
         }));
     }

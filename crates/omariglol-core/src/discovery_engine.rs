@@ -484,12 +484,17 @@ impl DiscoveryEngine {
         let cache = self.cache.clone();
         let on_found = {
             let on_event = Arc::clone(&on_event);
-            let probed = Arc::clone(&probed);
             let ttl = options.ttl_secs;
             move |result: &ProbeResult| {
                 let entry = CachedInstrument::from_probe(result, vlan, ttl);
                 cache.lock().unwrap().insert(entry.clone());
                 on_event(DiscoveryEvent::InstrumentFound { instrument: entry });
+            }
+        };
+        let on_probe = {
+            let on_event = Arc::clone(&on_event);
+            let probed = Arc::clone(&probed);
+            move |_host: &std::net::Ipv4Addr| {
                 let mut count = probed.lock().unwrap();
                 *count += 1;
                 on_event(DiscoveryEvent::Progress {
@@ -513,6 +518,7 @@ impl DiscoveryEngine {
             options.probe_timeout,
             options.concurrency,
             on_found,
+            on_probe,
         );
 
         // 4b. Fold in the broadcast/mDNS/USB results once they have finished.
@@ -776,9 +782,23 @@ mod tests {
             concurrency: 1,
             ..Default::default()
         };
-        let report = engine.run(&options, |_| {});
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let sink = events.clone();
+        let report = engine.run(&options, move |event| {
+            sink.lock().unwrap().push(event);
+        });
         assert_eq!(report.probed_hosts, 1);
         assert!(report.found.is_empty());
+        // Progress tracks hosts probed, not instruments found, so the one
+        // unresponsive host must still advance it to completion.
+        let events = events.lock().unwrap();
+        assert!(events.iter().any(|event| matches!(
+            event,
+            DiscoveryEvent::Progress {
+                probed: 1,
+                total: 1
+            }
+        )));
     }
 
     #[test]

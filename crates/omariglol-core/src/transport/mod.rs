@@ -10,6 +10,54 @@ use std::time::Duration;
 use crate::device::{Target, Transport};
 use crate::error::{Error, Result};
 
+/// Total length of a definite-length IEEE-488.2 block (`#<n><len><data>`) in
+/// `data`, if the header is fully present.
+///
+/// Returns `None` for text, indefinite blocks (`#0`) and incomplete headers,
+/// which fall back to newline framing. Shared by the transports so the block
+/// framing rules live in one place.
+pub(crate) fn declared_block_len(data: &[u8]) -> Option<usize> {
+    if data.first() != Some(&b'#') {
+        return None;
+    }
+    let digit = *data.get(1)?;
+    if !digit.is_ascii_digit() {
+        return None;
+    }
+    let n = (digit - b'0') as usize;
+    if n == 0 {
+        return None;
+    }
+    let len_start: usize = 2;
+    let len_end = len_start.checked_add(n)?;
+    let digits = data.get(len_start..len_end)?;
+    let len: usize = std::str::from_utf8(digits).ok()?.parse().ok()?;
+    len_end.checked_add(len)
+}
+
+/// Strip the transport terminator from a response, without eating a payload
+/// byte of a definite-length IEEE-488.2 block.
+///
+/// A block's declared length covers only its payload, but instruments may still
+/// append `\n`/`\r\n`. Stripping the last byte unconditionally would corrupt a
+/// binary block whose final payload byte happens to be `\n` or `\r` (a
+/// screenshot or waveform, say), so when the response is a complete
+/// definite-length block, only bytes past the declared total are removed.
+pub(crate) fn strip_response_terminator(data: &mut Vec<u8>) {
+    if let Some(total) = declared_block_len(data)
+        && total <= data.len()
+    {
+        data.truncate(total);
+        return;
+    }
+    if data.last() == Some(&b'\n') {
+        data.pop();
+        if data.last() == Some(&b'\r') {
+            data.pop();
+        }
+    }
+}
+
 /// A bidirectional SCPI channel to one instrument.
 ///
 /// Implementations are deliberately blocking: instruments are slow, the
@@ -267,6 +315,43 @@ mod tests {
         let response = transport.query("*IDN?").unwrap();
         assert_eq!(response, b"42");
         assert_eq!(state.lock().unwrap().sent, vec!["*IDN?".to_string()]);
+    }
+
+    #[test]
+    fn test_strip_response_terminator_text() {
+        let mut lf = b"hello\n".to_vec();
+        strip_response_terminator(&mut lf);
+        assert_eq!(lf, b"hello");
+
+        let mut crlf = b"hello\r\n".to_vec();
+        strip_response_terminator(&mut crlf);
+        assert_eq!(crlf, b"hello");
+    }
+
+    #[test]
+    fn test_strip_response_terminator_keeps_block_payload() {
+        // A definite-length block whose final payload byte is `\n` and which has
+        // no trailing terminator must be returned intact: the `\n` is payload,
+        // not framing.
+        let mut block = b"#16hello\n".to_vec(); // header `#1` `6`, payload `hello\n`
+        let expected = block.clone();
+        strip_response_terminator(&mut block);
+        assert_eq!(block, expected);
+
+        // With a trailing terminator, only the terminator is removed.
+        let mut with_term = b"#16hello\n\n".to_vec();
+        strip_response_terminator(&mut with_term);
+        assert_eq!(with_term, b"#16hello\n");
+    }
+
+    #[test]
+    fn test_declared_block_len_shared() {
+        assert_eq!(declared_block_len(b"#15hello"), Some(8));
+        // Indefinite blocks and non-blocks have no declared total.
+        assert_eq!(declared_block_len(b"#0hello\n"), None);
+        assert_eq!(declared_block_len(b"plain"), None);
+        // Incomplete header.
+        assert_eq!(declared_block_len(b"#3"), None);
     }
 
     #[test]

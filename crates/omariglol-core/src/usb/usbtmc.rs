@@ -195,12 +195,9 @@ mod real {
                 }
             }
 
-            if data.last() == Some(&TERMINATOR) {
-                data.pop();
-            }
-            if data.last() == Some(&b'\r') {
-                data.pop();
-            }
+            // Strip the transport terminator, but never eat a payload byte of a
+            // definite-length binary block (a screenshot, say).
+            crate::transport::strip_response_terminator(&mut data);
             Ok(data)
         }
 

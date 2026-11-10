@@ -364,13 +364,9 @@ impl ScpiTransport for Vxi11Transport {
             }
         }
 
-        // Strip the transport terminator, as the trait contract requires.
-        if data.last() == Some(&TERMINATOR) {
-            data.pop();
-        }
-        if data.last() == Some(&b'\r') {
-            data.pop();
-        }
+        // Strip the transport terminator, as the trait contract requires, but
+        // never eat a payload byte of a definite-length binary block.
+        super::strip_response_terminator(&mut data);
         Ok(data)
     }
 

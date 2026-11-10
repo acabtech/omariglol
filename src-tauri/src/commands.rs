@@ -299,7 +299,10 @@ impl From<&Instrument> for InstrumentView {
         InstrumentView {
             id: instrument.id.to_string(),
             label: instrument.label(),
-            address: instrument.device.address.to_string(),
+            // `display_address` renders a USB instrument as its `usb:...`
+            // selector; the raw `address` is `0.0.0.0` for USB and would show
+            // the wrong thing in the workspace and topology views.
+            address: instrument.device.display_address(),
             transport: instrument.config.transport,
             port: instrument.config.port,
             state: instrument.state,
@@ -1727,6 +1730,20 @@ mod tests {
         assert_eq!(view.instrument_type, "oscilloscope");
         assert_eq!(view.instrument_glyph, "scope");
         assert_eq!(view.state, InstrumentState::Connected);
+        assert_eq!(view.address, "192.168.1.50");
+    }
+
+    #[test]
+    fn test_instrument_view_usb_address_is_selector_not_unspecified_ip() {
+        // A USB instrument's `device.address` is `0.0.0.0`; the view must expose
+        // the `usb:...` selector instead, matching the discovery panel.
+        let selector =
+            omariglol_core::device::UsbSelector::new(0x1AB1, 0x04CE).with_serial("DS1ZA1");
+        let instrument = Instrument::from_device(Device::usb(selector));
+        let view = InstrumentView::from(&instrument);
+        assert_eq!(view.address, "usb:0x1AB1:0x04CE:DS1ZA1");
+        assert!(!view.address.contains("0.0.0.0"));
+        assert_eq!(view.transport, Transport::Usb);
     }
 
     #[test]

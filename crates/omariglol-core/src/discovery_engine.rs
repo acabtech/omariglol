@@ -207,6 +207,55 @@ impl DiscoveryCache {
         self.entries.insert(entry.key(), entry);
     }
 
+    /// Insert an entry, preserving richer metadata already cached under the
+    /// same key.
+    ///
+    /// Broadcast/mDNS and USB entries carry little or no identity metadata:
+    /// [`CachedInstrument::from_device`] leaves `idn`/`vendor`/`model`/`serial`/
+    /// `capabilities` empty. When a direct probe has already populated the same
+    /// key, those fields must survive the fold-in; only the freshness fields
+    /// (`discovered_ms`/`ttl_secs`) and any newly learned device details are
+    /// refreshed. Returns the entry as stored, so callers can emit the merged
+    /// result rather than the metadata-poor input.
+    pub fn insert_merging(&mut self, mut entry: CachedInstrument) -> CachedInstrument {
+        if let Some(existing) = self.entries.get(&entry.key()) {
+            if entry.idn.is_empty() {
+                entry.idn = existing.idn.clone();
+            }
+            if entry.vendor.is_empty() {
+                entry.vendor = existing.vendor.clone();
+            }
+            if entry.model.is_empty() {
+                entry.model = existing.model.clone();
+            }
+            if entry.serial.is_empty() {
+                entry.serial = existing.serial.clone();
+            }
+            if entry.capabilities.is_empty() {
+                entry.capabilities = existing.capabilities.clone();
+            }
+            if entry.vlan.is_none() {
+                entry.vlan = existing.vlan;
+            }
+            // Preserve connection details the probe learned (ports, hostname,
+            // mDNS name) when the advertised entry does not carry them.
+            if entry.device.hostname.is_none() {
+                entry.device.hostname = existing.device.hostname.clone();
+            }
+            if entry.device.vxi11_port.is_none() {
+                entry.device.vxi11_port = existing.device.vxi11_port;
+            }
+            if entry.device.raw_port.is_none() {
+                entry.device.raw_port = existing.device.raw_port;
+            }
+            if entry.device.mdns_name.is_none() {
+                entry.device.mdns_name = existing.device.mdns_name.clone();
+            }
+        }
+        self.entries.insert(entry.key(), entry.clone());
+        entry
+    }
+
     /// The fresh entry for an address, if any.
     pub fn get(&self, address: IpAddr) -> Option<&CachedInstrument> {
         self.entries
@@ -551,10 +600,12 @@ impl DiscoveryEngine {
         if !discovered.is_empty() {
             let mut cache = self.cache.lock().unwrap();
             for entry in discovered {
-                on_event(DiscoveryEvent::InstrumentFound {
-                    instrument: entry.clone(),
-                });
-                cache.insert(entry);
+                // Merge rather than overwrite: an advertised/USB entry must not
+                // clobber the identity and capabilities a probe already filled
+                // in for the same key. Emit the merged entry so the UI keeps the
+                // richer metadata it received moments earlier in the same scan.
+                let merged = cache.insert_merging(entry);
+                on_event(DiscoveryEvent::InstrumentFound { instrument: merged });
             }
         }
 
@@ -694,6 +745,57 @@ mod tests {
         assert_eq!(cache.len(), 1);
         assert!(cache.get(address).is_some());
         assert!(cache.get("10.0.0.1".parse().unwrap()).is_none());
+    }
+
+    #[test]
+    fn test_cache_merge_preserves_probed_metadata() {
+        let mut cache = DiscoveryCache::new(300);
+        // A direct probe fills in identity and capabilities.
+        cache.insert(CachedInstrument::from_probe(
+            &probe("192.168.1.50", "RIGOL TECHNOLOGIES,DS1054Z,DS1ZA123,1.0"),
+            Some(100),
+            300,
+        ));
+
+        // A later broadcast/mDNS fold-in for the same address carries no IDN.
+        let mut advertised_device = Device::manual("192.168.1.50".parse().unwrap());
+        advertised_device.method = DiscoveryMethod::Vxi11Broadcast;
+        advertised_device.hostname = Some("scope.local".to_string());
+        let advertised = CachedInstrument::from_device(advertised_device, None, 300);
+        let merged = cache.insert_merging(advertised);
+
+        // The rich metadata must survive; the newly learned hostname is kept.
+        assert_eq!(merged.idn, "RIGOL TECHNOLOGIES,DS1054Z,DS1ZA123,1.0");
+        assert_eq!(merged.model, "DS1054Z");
+        assert_eq!(merged.serial, "DS1ZA123");
+        assert_eq!(merged.vlan, Some(100));
+        assert!(merged.has_capability("run"));
+        assert_eq!(merged.device.hostname.as_deref(), Some("scope.local"));
+        // The probe's raw port is preserved even though the advertised entry
+        // did not carry one.
+        assert_eq!(merged.device.raw_port, Some(5025));
+
+        let stored = cache.get("192.168.1.50".parse().unwrap()).unwrap();
+        assert_eq!(stored.model, "DS1054Z");
+        assert!(stored.has_capability("run"));
+    }
+
+    #[test]
+    fn test_cache_merge_keeps_probe_when_advertised_first() {
+        let mut cache = DiscoveryCache::new(300);
+        // Advertised entry first (metadata-poor), then a probe fills it in.
+        let mut advertised_device = Device::manual("192.168.1.51".parse().unwrap());
+        advertised_device.method = DiscoveryMethod::Vxi11Broadcast;
+        cache.insert_merging(CachedInstrument::from_device(advertised_device, None, 300));
+
+        let merged = cache.insert_merging(CachedInstrument::from_probe(
+            &probe("192.168.1.51", "KEYSIGHT TECHNOLOGIES,34401A,MY123,1.0"),
+            None,
+            300,
+        ));
+        assert_eq!(merged.model, "34401A");
+        assert_eq!(merged.serial, "MY123");
+        assert!(merged.has_capability("measure_voltage"));
     }
 
     #[test]

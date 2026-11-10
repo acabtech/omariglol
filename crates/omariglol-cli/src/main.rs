@@ -79,6 +79,9 @@ pub enum Command {
     /// Capture an instrument's screen to an image file.
     Screenshot(ScreenshotArgs),
 
+    /// Capture a scope's waveform memory to a file (.npy by default).
+    Capture(CaptureArgs),
+
     /// Measure SCPI round-trip performance.
     Benchmark(BenchmarkArgs),
 
@@ -300,6 +303,131 @@ pub struct ScreenshotArgs {
 }
 
 #[derive(Debug, Args)]
+pub struct CaptureArgs {
+    /// Instrument address, e.g. 192.168.1.50 or usb:0x1AB1:0x04CE.
+    #[arg(value_name = "ADDRESS")]
+    pub address: String,
+
+    /// Where to write the capture. The extension is not required; `.npy` is
+    /// appended for a NumPy array, `.csv` when `--csv` is given.
+    #[arg(value_name = "FILE")]
+    pub file: PathBuf,
+
+    /// Waveform source, e.g. CHAN1..CHAN4, MATH or a reference channel.
+    #[arg(long, default_value = "CHAN1", value_name = "SOURCE")]
+    pub source: String,
+
+    /// Acquisition mode: `raw` (full memory, needs a stopped scope), `norm`
+    /// (screen memory) or `max` (peak-detect envelope).
+    #[arg(long, value_enum, default_value_t = CaptureMode::Raw)]
+    pub mode: CaptureMode,
+
+    /// SCPI data format for `:WAV:FORM`.
+    #[arg(long, value_enum, default_value_t = CaptureDataFormat::Word)]
+    pub data_format: CaptureDataFormat,
+
+    /// Point count for `norm`/`max` modes. Ignored for `raw`, which reads the
+    /// whole memory reported by the preamble.
+    #[arg(long, value_name = "N")]
+    pub points: Option<u64>,
+
+    /// Maximum points per `:WAV:DATA?` transfer. The DS1000Z caps a RAW read at
+    /// 250000, which is the default.
+    #[arg(long, default_value_t = 250_000, value_name = "N")]
+    pub chunk_points: u64,
+
+    /// Byte order of a 16-bit WORD payload. Try `big` if the values look
+    /// byte-swapped (pinned to the rails).
+    #[arg(long, value_enum, default_value_t = CaptureWordOrder::Little)]
+    pub word_order: CaptureWordOrder,
+
+    /// Do not stop the instrument first. Only valid when it is already stopped;
+    /// RAW mode requires a stopped scope.
+    #[arg(long)]
+    pub no_stop: bool,
+
+    /// Write two-column CSV (`time_s,voltage_v`) instead of a NumPy `.npy`.
+    #[arg(long)]
+    pub csv: bool,
+
+    /// Do not write the `<file>.json` metadata sidecar.
+    #[arg(long)]
+    pub no_metadata: bool,
+
+    /// Use the raw TCP socket instead of VXI-11.
+    #[arg(long)]
+    pub raw: bool,
+
+    /// Talk to a USB (USBTMC) instrument; the address is `usb:VVVV:PPPP[:SERIAL]`.
+    #[arg(long, conflicts_with = "raw")]
+    pub usb: bool,
+
+    /// Override the port.
+    #[arg(long, value_name = "PORT")]
+    pub port: Option<u16>,
+
+    /// Socket timeout in seconds.
+    #[arg(long, default_value_t = 10, value_name = "SECONDS")]
+    pub timeout: u64,
+
+    /// Print a summary as JSON on stdout.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// The `--mode` choices for `riglol capture`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum CaptureMode {
+    Raw,
+    Norm,
+    Max,
+}
+
+impl From<CaptureMode> for omariglol_core::WaveformMode {
+    fn from(mode: CaptureMode) -> Self {
+        match mode {
+            CaptureMode::Raw => Self::Raw,
+            CaptureMode::Norm => Self::Normal,
+            CaptureMode::Max => Self::Maximum,
+        }
+    }
+}
+
+/// The `--data-format` choices for `riglol capture`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum CaptureDataFormat {
+    Word,
+    Byte,
+    Ascii,
+}
+
+impl From<CaptureDataFormat> for omariglol_core::WaveformFormat {
+    fn from(format: CaptureDataFormat) -> Self {
+        match format {
+            CaptureDataFormat::Word => Self::Word,
+            CaptureDataFormat::Byte => Self::Byte,
+            CaptureDataFormat::Ascii => Self::Ascii,
+        }
+    }
+}
+
+/// The `--word-order` choices for `riglol capture`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum CaptureWordOrder {
+    Little,
+    Big,
+}
+
+impl From<CaptureWordOrder> for omariglol_core::WordByteOrder {
+    fn from(order: CaptureWordOrder) -> Self {
+        match order {
+            CaptureWordOrder::Little => Self::Little,
+            CaptureWordOrder::Big => Self::Big,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
 pub struct BenchmarkArgs {
     /// Instrument address.
     #[arg(value_name = "ADDRESS")]
@@ -348,6 +476,7 @@ fn main() -> anyhow::Result<()> {
         Command::Discover(args) => cmd_discover(args),
         Command::Scpi(args) => cmd_scpi(args),
         Command::Screenshot(args) => cmd_screenshot(args),
+        Command::Capture(args) => cmd_capture(args),
         Command::Benchmark(args) => cmd_benchmark(args),
         Command::Run(args) => cmd_run(args),
         Command::Driver(args) => cmd_driver(args),
@@ -769,6 +898,84 @@ fn finish_screenshot(
         shot.format.extension(),
         shot.profile
     );
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// capture
+// ---------------------------------------------------------------------------
+
+/// Capture a scope's waveform memory and write it to a file.
+///
+/// The chunk stitching, preamble decoding and file writers live in
+/// [`omariglol_core::waveform`]; this function only resolves the transport and
+/// reports what happened. A capture is written as a NumPy `.npy` by default so
+/// an agent can analyse it with `numpy.load()` instead of streaming every sample
+/// through its context.
+fn cmd_capture(args: CaptureArgs) -> anyhow::Result<()> {
+    let mut session = open_session(
+        &args.address,
+        select_transport(args.raw, args.usb),
+        args.port,
+        args.timeout,
+    )?;
+    vlog!(1, "connected: {}", session.description());
+
+    let options = omariglol_core::CaptureOptions {
+        source: args.source.clone(),
+        mode: args.mode.into(),
+        format: args.data_format.into(),
+        points: args.points,
+        chunk_points: args.chunk_points,
+        word_byte_order: args.word_order.into(),
+        stop_first: !args.no_stop,
+    };
+
+    let waveform = omariglol_core::capture_waveform(session.transport_mut(), &options)?;
+
+    // Resolve the output path: honour an explicit .npy/.csv extension, otherwise
+    // append the one that matches the chosen encoding.
+    let default_ext = if args.csv { "csv" } else { "npy" };
+    let file = match args.file.extension().and_then(|ext| ext.to_str()) {
+        Some("npy") | Some("csv") => args.file.clone(),
+        _ => args.file.with_extension(default_ext),
+    };
+
+    let is_npy = file.extension().and_then(|ext| ext.to_str()) == Some("npy");
+    if is_npy {
+        waveform.write_npy(&file)?;
+    } else {
+        waveform.write_csv(&file)?;
+    }
+
+    if !args.no_metadata {
+        let meta_path = file.with_extension("json");
+        waveform.write_metadata(&meta_path)?;
+        vlog!(1, "wrote metadata to {}", meta_path.display());
+    }
+
+    if args.json {
+        let summary = serde_json::json!({
+            "file": file.display().to_string(),
+            "source": waveform.source,
+            "mode": waveform.mode,
+            "format": waveform.format,
+            "points": waveform.len(),
+            "chunks": waveform.chunks,
+            "x_increment": waveform.preamble.x_increment,
+            "y_increment": waveform.preamble.y_increment,
+        });
+        println!("{}", serde_json::to_string_pretty(&summary)?);
+    } else {
+        println!(
+            "wrote {} ({} points from {} chunk(s), {} format, {} mode)",
+            file.display(),
+            waveform.len(),
+            waveform.chunks,
+            waveform.format.mnemonic(),
+            waveform.mode.mnemonic(),
+        );
+    }
     Ok(())
 }
 

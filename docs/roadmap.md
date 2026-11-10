@@ -38,7 +38,8 @@ plan is in [`plans/0.1.3-usb-scpi.md`](../plans/0.1.3-usb-scpi.md).
 ### 0.1.6 — SUMP capture
 
 - [ ] `usb::sump` for the Saleae clone
-- [ ] `capture` / `waveform` model and `riglol capture`
+- [x] `waveform` model and `riglol capture` (full-memory capture with DS1000Z
+      RAW chunk stitching, NumPy `.npy` + JSON metadata output)
 
 ### 0.1.7 — all targets over USB
 
@@ -69,6 +70,9 @@ Python scripting plus Omarchy integration.
 - [x] `screenshot` — IEEE-488.2 definite- and indefinite-length block parsing
 - [x] `screenshot` — profiles for Rigol DS1000Z/DS2000/DS4000, Keysight
       InfiniiVision, Rohde & Schwarz
+- [x] `waveform` — preamble parsing, DS1000Z RAW chunk stitching (`:WAV:STAR`/
+      `:WAV:STOP` at 250 k points), byte/word/ASCII decoding, NumPy `.npy` and
+      CSV writers
 - [x] `benchmark` — round-trip statistics with percentiles
 
 ### `omariglol-script`
@@ -87,6 +91,8 @@ Python scripting plus Omarchy integration.
 - [x] `discover` with `--mdns`, `--timeout`, `--json`, `--add`
 - [x] `scpi` with `--raw`, `--port`, `--hex`, and an interactive mode
 - [x] `screenshot` with `--raw`, `--vxi11`, `--command` override
+- [x] `capture` with `--source`, `--mode`, `--data-format`, `--usb`, `--raw`,
+      `--csv`, `--json`
 - [x] `benchmark` with `--count`, `--command`, `--json`
 - [x] `run` for Python scripts
 - [x] `driver`, `workspace`, `measure` and `autoscale`

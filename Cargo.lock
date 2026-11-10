@@ -234,7 +234,7 @@ dependencies = [
 
 [[package]]
 name = "omariglol-core"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "base64",
  "rand",
@@ -247,7 +247,7 @@ dependencies = [
 
 [[package]]
 name = "omariglol-script"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "omariglol-core",
  "pyo3",
@@ -402,7 +402,7 @@ dependencies = [
 
 [[package]]
 name = "riglol-cli"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "clap",

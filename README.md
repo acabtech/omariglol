@@ -60,7 +60,7 @@ Three frontends over one protocol core:
 
 Full detail in [`docs/architecture.md`](docs/architecture.md).
 
-## Feature set (0.1.5)
+## Feature set (0.1.6)
 
 The CLI mirrors `lxi-tools`, with Python in place of Lua:
 
@@ -69,6 +69,7 @@ The CLI mirrors `lxi-tools`, with Python in place of Lua:
 | `riglol discover` | implemented | VXI-11 broadcast, non-disruptive UDP portmapper detection, mDNS/DNS-SD, subnet scan, USB enumeration, TTL cache, `--json`, `--add`, `--no-usb` |
 | `riglol scpi` | implemented | VXI-11, `--raw` or `--usb` (USBTMC), hex output, interactive mode |
 | `riglol screenshot` | implemented | IEEE-488.2 block capture, per-vendor profiles, `--command` override, `--usb`, automatic VXI-11 fallback when raw SCPI is unavailable |
+| `riglol capture` | implemented | Full-memory waveform capture with DS1054Z RAW chunk stitching; writes NumPy `.npy` + JSON metadata, or CSV; `--usb`, `--raw`, `--source`, `--mode`, `--data-format` |
 | `riglol benchmark` | implemented | SCPI round-trip statistics, `--json`, `--usb` |
 | `riglol usb list` | implemented | Enumerate USB instruments and their USBTMC interface status |
 | `riglol run` | implemented | Execute a Python measurement script |
@@ -133,6 +134,24 @@ npm run build
 npm run tauri dev
 ```
 
+## Waveform capture
+
+`riglol capture` pulls a scope's acquisition memory and writes it to a NumPy
+`.npy` file (plus a JSON metadata sidecar) so a script or an LLM agent can
+analyse it with a few lines of `numpy` instead of streaming samples through
+context:
+
+```bash
+riglol capture --usb usb:0x1AB1:0x04CE /tmp/ch1.npy --source CHAN1
+python3 -c "import numpy as np; w = np.load('/tmp/ch1.npy'); print(w.shape)"
+```
+
+It hides the DS1054Z RAW-mode constraints: it stops the scope, reads the
+preamble, walks the memory in 250 000-point chunks via `:WAV:STAR`/`:WAV:STOP`
+and stitches the payloads into one sample vector, converting raw codes to volts.
+USB is typically 5–6× faster than Ethernet for the same capture. See
+[`docs/waveform-capture.md`](docs/waveform-capture.md).
+
 ## NanoVNA-H support
 
 A NanoVNA-H running the USBTMC firmware from
@@ -152,13 +171,13 @@ Screenshots are not available over USBTMC; use the CDC interface for those. See
 
 ## Release notes
 
-See [`CHANGELOG.md`](CHANGELOG.md) for the 0.1.5 changes, including the
+See [`CHANGELOG.md`](CHANGELOG.md) for the 0.1.6 changes, including the
 repo-root plugin manifest, transport-aware screenshots, parametrised SCPI
 queries in the console, and workspace USB reconnects.
 
 ## Roadmap
 
-- **0.1.x** — the feature set above; the current release is 0.1.5.
+- **0.1.x** — the feature set above; the current release is 0.1.6.
 - **0.2.0** — scripting depth: a saved snippet library and a headless daemon so
   scripts can share one instrument connection. Live charts, CSV logging and
   multi-instrument workspace scripts have already landed.

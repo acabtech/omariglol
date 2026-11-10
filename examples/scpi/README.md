@@ -104,6 +104,7 @@ RIGLOL_DELAY=2 ./00_smoke_test.sh       # or via the environment
 | [`16_driver.sh`](16_driver.sh) | Show the named command surface | `riglol driver` |
 | [`17_reset.sh`](17_reset.sh) | Reset and self-test | `*CLS`, `*RST`, `*TST?` |
 | [`18_usb.sh`](18_usb.sh) | Enumerate and identify over USB | `*IDN?`, `:MEAS:FREQ?` |
+| [`20_capture.sh`](20_capture.sh) | Capture full waveform memory to `.npy` | `riglol capture` |
 
 ## Interactive use
 

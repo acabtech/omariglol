@@ -6,6 +6,27 @@ semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.6] — 2026-11-10
+
+Waveform capture: full-memory reads with chunk stitching and NumPy output.
+
+### Added
+
+- **`riglol capture`** — full-memory waveform capture. It stops the scope, reads
+  the `:WAV:PRE?` preamble, walks the acquisition memory in 250 000-point
+  windows via `:WAV:STAR`/`:WAV:STOP`, stitches the chunk payloads and converts
+  raw codes to volts. The DS1054Z `:WAV:MODE RAW` path otherwise only works
+  while stopped and returns at most 250 k points per read.
+- **NumPy/CSV output.** `capture` writes a float64 `.npy` array of shape
+  `(n, 2)` (`time_s`, `voltage_v`) plus a JSON metadata sidecar, so an agent can
+  `numpy.load()` the capture instead of streaming every sample through its
+  context. `--csv` writes the two columns as text instead.
+- `omariglol-core::waveform` module (`CaptureOptions`, `Waveform`,
+  `WaveformPreamble`, `WaveformMode`, `WaveformFormat`, `WordByteOrder`) shared
+  by every frontend.
+- `docs/waveform-capture.md` documenting the RAW-mode constraints, chunking,
+  formats and the CLI.
+
 ## [0.1.5] — 2026-11-04
 
 Patch release fixing plugin installation and the three reported transport and

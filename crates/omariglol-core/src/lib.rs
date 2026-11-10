@@ -64,6 +64,7 @@ pub mod timeline;
 pub mod transport;
 pub mod trigger;
 pub mod usb;
+pub mod waveform;
 pub mod workspace;
 
 pub use device::{Device, DiscoveryMethod, Target, Transport, UsbSelector};
@@ -83,6 +84,10 @@ pub use preset::{Preset, PresetPlan, PresetStep};
 pub use rule::{Comparison, EvaluationMode, Rule, RuleDecision};
 pub use timeline::{Timeline, TimelineEvent, TimelineEventKind};
 pub use trigger::{Trigger, TriggerError, TriggerState};
+pub use waveform::{
+    CaptureOptions, Waveform, WaveformFormat, WaveformMode, WaveformPreamble, WordByteOrder,
+    capture as capture_waveform,
+};
 pub use workspace::{Workspace, WorkspaceId, WorkspaceManager, WorkspaceMetadata};
 
 // Discovery subsystem.

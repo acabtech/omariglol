@@ -41,6 +41,7 @@ The whole instrument-facing surface. Module map:
 | `discovery` | VXI-11 broadcast, UDP portmapper detection, mDNS/DNS-SD and direct SCPI probes |
 | `discovery_engine` | Cached multi-strategy discovery with TTL, incremental rescans and USB enumeration |
 | `screenshot` | IEEE-488.2 block parsing, per-vendor capture profiles |
+| `waveform` | Full-memory waveform capture: preamble decoding, RAW chunk stitching, NPY/CSV writers |
 | `benchmark` | SCPI round-trip statistics |
 
 #### Why implement ONC RPC by hand?
@@ -117,6 +118,7 @@ A `clap`-derived binary. Subcommands mirror `lxi` so muscle memory transfers:
 riglol discover [--mdns] [--no-scan] [--no-usb] [--timeout N] [--json] [--add]
 riglol scpi [--raw|--usb] [--port N] [--hex] <address> [command...]
 riglol screenshot [--raw|--vxi11|--usb] [--command CMD] <address> <file>
+riglol capture [--raw|--usb] [--source S] [--mode M] [--data-format F] <address> <file>
 riglol benchmark [--raw|--usb] [--count N] [--command CMD] [--json] <address>
 riglol run <script.py> [args...]
 riglol driver [--raw|--usb] [--json] <address>

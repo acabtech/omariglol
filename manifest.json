@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "tech.alatcerdas.omariglol",
   "name": "omariglol",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "author": "Sam Ralial",
   "license": "MIT",
   "description": "Measure, detect and script LXI instruments from the Omarchy bar.",

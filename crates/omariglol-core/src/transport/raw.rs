@@ -21,32 +21,6 @@ pub const MAX_RESPONSE: usize = 32 * 1024 * 1024;
 /// The SCPI terminator.
 const TERMINATOR: u8 = b'\n';
 
-/// Total length of a definite-length IEEE-488.2 block (`#<n><len><data>`) in
-/// `data`, if the header is fully present.
-///
-/// Returns `None` for text, indefinite blocks (`#0`) and incomplete headers,
-/// which fall back to newline framing. Mirrors the parser in
-/// [`crate::screenshot`] but is kept local so the transport layer stays
-/// independent of the screenshot layer.
-fn declared_block_len(data: &[u8]) -> Option<usize> {
-    if data.first() != Some(&b'#') {
-        return None;
-    }
-    let digit = *data.get(1)?;
-    if !digit.is_ascii_digit() {
-        return None;
-    }
-    let n = (digit - b'0') as usize;
-    if n == 0 {
-        return None;
-    }
-    let len_start: usize = 2;
-    let len_end = len_start.checked_add(n)?;
-    let digits = data.get(len_start..len_end)?;
-    let len: usize = std::str::from_utf8(digits).ok()?.parse().ok()?;
-    len_end.checked_add(len)
-}
-
 /// A raw TCP connection to an instrument's SCPI socket.
 pub struct RawTransport {
     stream: TcpStream,
@@ -132,7 +106,7 @@ impl ScpiTransport for RawTransport {
             // reads — screenshots — both correct and fast over the raw socket:
             // the whole image streams in at TCP speed instead of being truncated
             // at the first `\n` byte inside the pixel data.
-            if let Some(total) = declared_block_len(&self.pending) {
+            if let Some(total) = super::declared_block_len(&self.pending) {
                 while self.pending.len() < total {
                     let n = self.stream.read(&mut buf)?;
                     if n == 0 {

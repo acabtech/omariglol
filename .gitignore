@@ -43,3 +43,8 @@ Thumbs.db
 /*.png
 /*.csv
 /*.bin
+
+# Waveform capture outputs (riglol capture / 20_capture.sh): .npy arrays are
+# tens of MB of instrument data and have no place in the repo.
+*.npy
+*-capture.json

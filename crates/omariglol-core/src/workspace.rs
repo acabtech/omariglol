@@ -207,8 +207,18 @@ impl Workspace {
     }
 
     /// Add a trigger, validating that it keeps the dependency graph acyclic.
+    ///
+    /// Triggers are replaced by id, so a trigger being updated is excluded from
+    /// the graph during validation; otherwise its own old edge would be seen as
+    /// a cycle and a valid replacement would be rejected.
     pub fn add_trigger(&mut self, trigger: Trigger) -> Result<(), TriggerError> {
-        trigger::validate_edge(&self.triggers, &trigger)?;
+        let existing: Vec<Trigger> = self
+            .triggers
+            .iter()
+            .filter(|existing| existing.id != trigger.id)
+            .cloned()
+            .collect();
+        trigger::validate_edge(&existing, &trigger)?;
         self.triggers.retain(|existing| existing.id != trigger.id);
         self.triggers.push(trigger);
         self.touch();
@@ -440,6 +450,27 @@ mod tests {
         assert!(workspace.presets.is_empty());
         assert!(workspace.rules.is_empty());
         assert!(workspace.triggers.is_empty());
+    }
+
+    #[test]
+    fn test_add_trigger_replaces_by_id_without_false_cycle() {
+        let mut workspace = Workspace::new("Test");
+        let a = workspace.add_instrument(device("192.168.1.50"));
+        let b = workspace.add_instrument(device("192.168.1.51"));
+
+        workspace
+            .add_trigger(Trigger::new("t1", a.clone(), b.clone(), "*OPC?", ":INIT"))
+            .unwrap();
+        // Replacing t1 with the reverse edge leaves a single acyclic edge, so
+        // the old a -> b edge must not count against it.
+        workspace
+            .add_trigger(Trigger::new("t1", b.clone(), a.clone(), "*OPC?", ":INIT"))
+            .unwrap();
+        assert_eq!(workspace.triggers.len(), 1);
+        let trigger = &workspace.triggers[0];
+        assert_eq!(trigger.id, "t1");
+        assert_eq!(trigger.source, b);
+        assert_eq!(trigger.target, a);
     }
 
     #[test]

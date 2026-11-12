@@ -6,6 +6,20 @@ semantic versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Trigger replacement no longer reports a false cycle.** `Workspace::add_trigger`
+  validates the candidate edge against the graph with the same-id trigger
+  excluded, matching the replace-by-id semantics of presets and rules.
+- **Deleting a workspace closes its instrument connections.** `workspace_delete`
+  now drops the sessions belonging to that workspace (unless another workspace
+  still references the instrument) instead of leaking sockets until exit.
+- **Batch results no longer conflate errors with device output.**
+  `instrument_batch_write` and `instrument_batch_query` return a tagged
+  `BatchResult` (`{ status: "ok", value }` or `{ status: "error", kind, message }`)
+  and start every instrument task before awaiting any of them. The `api.ts`
+  types document the new contract.
+
 ## [0.1.6] — 2026-11-10
 
 Waveform capture: full-memory reads with chunk stitching and NumPy output.

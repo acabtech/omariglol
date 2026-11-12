@@ -161,6 +161,26 @@ fn no_session() -> CommandError {
     )
 }
 
+/// Drop live sessions for `deleted_ids` unless another workspace still owns
+/// them.
+///
+/// Sessions are keyed by instrument id only, so a connection is closed solely
+/// when no remaining workspace references the instrument. The manager lock must
+/// be released before calling this, since it takes the session lock.
+fn close_orphaned_sessions(
+    sessions: &mut HashMap<InstrumentId, Connection>,
+    deleted_ids: &[InstrumentId],
+    remaining_ids: &[InstrumentId],
+) {
+    sessions.retain(|instrument_id, connection| {
+        let keep = !deleted_ids.contains(instrument_id) || remaining_ids.contains(instrument_id);
+        if !keep {
+            connection.close();
+        }
+        keep
+    });
+}
+
 /// The standard "no such instrument" error.
 fn no_instrument(id: impl std::fmt::Display) -> CommandError {
     CommandError::new(
@@ -657,14 +677,37 @@ pub async fn workspace_save(state: State<'_, WorkspaceState>) -> CommandResult<(
     Ok(())
 }
 
-/// Delete a workspace and all its data.
+/// Delete a workspace and all its data, closing the connections it owned.
 #[tauri::command]
 pub async fn workspace_delete(state: State<'_, WorkspaceState>, id: String) -> CommandResult<()> {
     let state = state.inner().clone();
-    let mut manager = state.manager.lock().unwrap();
-    if !manager.delete(&WorkspaceId(id)) {
-        return Err(no_workspace());
-    }
+    let workspace_id = WorkspaceId(id);
+
+    // Collect the workspace's instruments while it still exists, then release
+    // the manager lock before touching the session map (see the module docs on
+    // lock ordering).
+    let (deleted_ids, remaining_ids) = {
+        let mut manager = state.manager.lock().unwrap();
+        let deleted_ids = manager
+            .get(&workspace_id)
+            .map(|workspace| workspace.instrument_ids())
+            .unwrap_or_default();
+        if !manager.delete(&workspace_id) {
+            return Err(no_workspace());
+        }
+        let remaining_ids: Vec<InstrumentId> = manager
+            .list()
+            .iter()
+            .flat_map(|workspace| workspace.instrument_ids())
+            .collect();
+        (deleted_ids, remaining_ids)
+    };
+
+    close_orphaned_sessions(
+        &mut state.sessions.lock().unwrap(),
+        &deleted_ids,
+        &remaining_ids,
+    );
     Ok(())
 }
 
@@ -1033,78 +1076,115 @@ pub struct BatchRequest {
     pub commands: HashMap<String, String>,
 }
 
-/// Send commands to multiple instruments in parallel.
+/// The outcome of one instrument operation inside a batch command.
+///
+/// The tagged representation lets callers tell a device response from an error
+/// without inspecting the string: a successful query carries `value`, a failure
+/// carries a machine-readable `kind` and a displayable `message`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", tag = "status")]
+pub enum BatchResult {
+    /// The operation succeeded. Writes have `value: None`.
+    Ok { value: Option<String> },
+    /// The operation failed.
+    Error { kind: String, message: String },
+}
+
+impl BatchResult {
+    /// A successful outcome, carrying a query response when there is one.
+    fn ok(value: Option<String>) -> Self {
+        BatchResult::Ok { value }
+    }
+
+    /// A failed outcome.
+    fn error(err: CommandError) -> Self {
+        BatchResult::Error {
+            kind: err.kind,
+            message: err.message,
+        }
+    }
+}
+
+/// Send commands to multiple instruments, one background task per instrument.
 #[tauri::command]
 pub async fn instrument_batch_write(
     state: State<'_, WorkspaceState>,
     request: BatchRequest,
-) -> CommandResult<HashMap<String, Option<String>>> {
+) -> CommandResult<HashMap<String, BatchResult>> {
     let state = state.inner().clone();
-    let mut results = HashMap::new();
+    // Dispatch every task before awaiting any, so one slow instrument cannot
+    // hold up the others from starting.
+    let mut tasks = Vec::with_capacity(request.commands.len());
     for (instrument_id, command) in request.commands {
         let id = InstrumentId(instrument_id.clone());
         let state_clone = state.clone();
         let command_clone = command.clone();
-        let outcome = tauri::async_runtime::spawn_blocking(move || {
+        let handle = tauri::async_runtime::spawn_blocking(move || {
             let mut sessions = state_clone.sessions.lock().unwrap();
             let connection = sessions.get_mut(&id).ok_or_else(no_session)?;
             connection.send(&command_clone)?;
             connection.record_success();
             Ok::<_, CommandError>(())
-        })
-        .await
-        .map_err(join_error)?;
-        match outcome {
-            Ok(()) => {
+        });
+        tasks.push((instrument_id, command, handle));
+    }
+
+    let mut results = HashMap::with_capacity(tasks.len());
+    for (instrument_id, command, handle) in tasks {
+        let outcome = match handle.await {
+            Ok(Ok(())) => {
                 state.record_timeline(
                     Some(InstrumentId(instrument_id.clone())),
                     TimelineEventKind::Command,
                     command,
                 );
-                results.insert(instrument_id, None);
+                BatchResult::ok(None)
             }
-            Err(err) => {
-                results.insert(instrument_id, Some(err.message));
-            }
-        }
+            Ok(Err(err)) => BatchResult::error(err),
+            Err(err) => BatchResult::error(join_error(err)),
+        };
+        results.insert(instrument_id, outcome);
     }
     Ok(results)
 }
 
-/// Query multiple instruments in parallel and return a map of results.
+/// Query multiple instruments, one background task per instrument.
 #[tauri::command]
 pub async fn instrument_batch_query(
     state: State<'_, WorkspaceState>,
     request: BatchRequest,
-) -> CommandResult<HashMap<String, Option<String>>> {
+) -> CommandResult<HashMap<String, BatchResult>> {
     let state = state.inner().clone();
-    let mut results = HashMap::new();
+    let mut tasks = Vec::with_capacity(request.commands.len());
     for (instrument_id, command) in request.commands {
         let id = InstrumentId(instrument_id.clone());
         let state_clone = state.clone();
         let command_clone = command.clone();
-        let outcome = tauri::async_runtime::spawn_blocking(move || {
+        let handle = tauri::async_runtime::spawn_blocking(move || {
             let mut sessions = state_clone.sessions.lock().unwrap();
             let connection = sessions.get_mut(&id).ok_or_else(no_session)?;
             let response = connection.query(&command_clone)?;
             connection.record_success();
             Ok::<_, CommandError>(response)
-        })
-        .await
-        .map_err(join_error)?;
-        match outcome {
-            Ok(response) => {
+        });
+        tasks.push((instrument_id, command, handle));
+    }
+
+    let mut results = HashMap::with_capacity(tasks.len());
+    for (instrument_id, command, handle) in tasks {
+        let outcome = match handle.await {
+            Ok(Ok(response)) => {
                 state.record_timeline(
                     Some(InstrumentId(instrument_id.clone())),
                     TimelineEventKind::Query,
                     format!("{command} -> {response}"),
                 );
-                results.insert(instrument_id, Some(response));
+                BatchResult::ok(Some(response))
             }
-            Err(err) => {
-                results.insert(instrument_id, Some(err.message));
-            }
-        }
+            Ok(Err(err)) => BatchResult::error(err),
+            Err(err) => BatchResult::error(join_error(err)),
+        };
+        results.insert(instrument_id, outcome);
     }
     Ok(results)
 }
@@ -1711,6 +1791,54 @@ mod tests {
             CommandError::from(ScriptError::Timeout(Duration::from_secs(1))).kind,
             "timeout"
         );
+    }
+
+    #[test]
+    fn test_batch_result_wire_format_is_tagged() {
+        // `src/lib/api.ts` depends on this shape: an error must never look
+        // like a successful response string.
+        let written = serde_json::to_value(BatchResult::ok(None)).unwrap();
+        assert_eq!(written, serde_json::json!({"status": "ok", "value": null}));
+
+        let queried =
+            serde_json::to_value(BatchResult::ok(Some("*IDN? -> X".to_string()))).unwrap();
+        assert_eq!(
+            queried,
+            serde_json::json!({"status": "ok", "value": "*IDN? -> X"})
+        );
+
+        let failed = serde_json::to_value(BatchResult::error(CommandError::new(
+            "timeout",
+            "no answer",
+        )))
+        .unwrap();
+        assert_eq!(
+            failed,
+            serde_json::json!({"status": "error", "kind": "timeout", "message": "no answer"})
+        );
+    }
+
+    #[test]
+    fn test_close_orphaned_sessions_keeps_shared_instruments() {
+        let target =
+            target_from_request(&request("192.168.1.50", Transport::Raw, None, 3)).unwrap();
+        let gone = InstrumentId::new("raw:192.168.1.50");
+        let shared = InstrumentId::new("raw:192.168.1.51");
+        let other = InstrumentId::new("raw:192.168.1.52");
+        let mut sessions = HashMap::new();
+        for id in [&gone, &shared, &other] {
+            sessions.insert(id.clone(), Connection::new(id.clone(), target.clone()));
+        }
+
+        close_orphaned_sessions(
+            &mut sessions,
+            std::slice::from_ref(&gone),
+            std::slice::from_ref(&shared),
+        );
+
+        assert!(!sessions.contains_key(&gone), "deleted-only session closed");
+        assert!(sessions.contains_key(&shared), "shared session kept");
+        assert!(sessions.contains_key(&other), "unrelated session kept");
     }
 
     #[test]

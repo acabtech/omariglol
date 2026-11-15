@@ -35,7 +35,7 @@ plan is in [`plans/0.1.3-usb-scpi.md`](../plans/0.1.3-usb-scpi.md).
 - [x] Parametrised SCPI query detection in the console
 - [x] Workspace reconnect preserves the USB selector and device name
 
-### 0.1.6 — SUMP capture
+### 0.1.7 — SUMP capture
 
 - [ ] `usb::sump` for the Saleae clone
 - [x] `waveform` model and `riglol capture` (full-memory capture with DS1000Z

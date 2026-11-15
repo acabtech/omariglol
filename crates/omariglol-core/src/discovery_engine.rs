@@ -418,7 +418,9 @@ pub struct DiscoveryReport {
     pub found: Vec<CachedInstrument>,
     /// How many hosts were probed.
     pub probed_hosts: usize,
-    /// How many hosts were skipped because their cache entry was fresh.
+    /// How many hosts were skipped before probing, either because their
+    /// address family is not supported by the direct scanner or because
+    /// their cache entry is fresh.
     pub skipped_hosts: usize,
     /// How long the run took, in milliseconds.
     pub elapsed_ms: f64,
@@ -519,16 +521,27 @@ impl DiscoveryEngine {
         }
         hosts.extend(options.extra_hosts.iter().copied());
 
-        // 4. Incremental: skip hosts whose cache entry is still fresh.
+        // 4. Drop hosts the IPv4-only direct scanner cannot probe, then skip
+        // hosts whose cache entry is still fresh.
         let mut skipped = 0usize;
+        let before_family = hosts.len();
+        hosts.retain(|host| matches!(host, IpAddr::V4(_)));
+        skipped += before_family - hosts.len();
         if options.incremental {
             let fresh = self.cache.lock().unwrap().fresh_addresses();
             let before = hosts.len();
             hosts.retain(|host| !fresh.contains(host));
-            skipped = before - hosts.len();
+            skipped += before - hosts.len();
         }
 
-        let total = hosts.len();
+        let ipv4_hosts: Vec<std::net::Ipv4Addr> = hosts
+            .iter()
+            .filter_map(|host| match host {
+                IpAddr::V4(ip) => Some(*ip),
+                IpAddr::V6(_) => None,
+            })
+            .collect();
+        let total = ipv4_hosts.len();
         let probed = Arc::new(Mutex::new(0usize));
         let cache = self.cache.clone();
         let on_found = {
@@ -552,14 +565,6 @@ impl DiscoveryEngine {
                 });
             }
         };
-
-        let ipv4_hosts: Vec<std::net::Ipv4Addr> = hosts
-            .iter()
-            .filter_map(|host| match host {
-                IpAddr::V4(ip) => Some(*ip),
-                IpAddr::V6(_) => None,
-            })
-            .collect();
 
         discovery::scan_hosts(
             &ipv4_hosts,
@@ -626,10 +631,11 @@ impl DiscoveryEngine {
             elapsed_ms,
         });
 
+        let probed_hosts = *probed.lock().unwrap();
         DiscoveryReport {
             config,
             found,
-            probed_hosts: total,
+            probed_hosts,
             skipped_hosts: skipped,
             elapsed_ms,
             strategies,
@@ -901,6 +907,49 @@ mod tests {
                 total: 1
             }
         )));
+    }
+
+    #[test]
+    fn test_engine_ipv6_extra_hosts_are_skipped_not_probed() {
+        let engine = DiscoveryEngine::new(300);
+        let options = DiscoveryOptions {
+            use_broadcast: false,
+            use_mdns: false,
+            scan_subnet: false,
+            use_usb: false,
+            extra_hosts: vec![
+                IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                IpAddr::V6(std::net::Ipv6Addr::LOCALHOST),
+            ],
+            probe_timeout: Duration::from_millis(50),
+            concurrency: 1,
+            ..Default::default()
+        };
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let sink = events.clone();
+        let report = engine.run(&options, move |event| {
+            sink.lock().unwrap().push(event);
+        });
+        assert_eq!(report.probed_hosts, 1);
+        assert_eq!(report.skipped_hosts, 1);
+        let events = events.lock().unwrap();
+        assert!(events.iter().any(|event| matches!(
+            event,
+            DiscoveryEvent::Progress {
+                probed: 1,
+                total: 1
+            }
+        )));
+
+        // With only IPv6 extras there is nothing to probe, and the report
+        // must not claim otherwise.
+        let options = DiscoveryOptions {
+            extra_hosts: vec![IpAddr::V6(std::net::Ipv6Addr::LOCALHOST)],
+            ..options
+        };
+        let report = engine.run(&options, |_| {});
+        assert_eq!(report.probed_hosts, 0);
+        assert_eq!(report.skipped_hosts, 1);
     }
 
     #[test]

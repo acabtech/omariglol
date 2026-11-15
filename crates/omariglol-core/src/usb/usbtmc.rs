@@ -30,6 +30,38 @@ const MAX_TRANSFER: usize = 64 * 1024;
 
 const TERMINATOR: u8 = b'\n';
 
+/// Validate the payload length a device announces in a bulk-in header.
+///
+/// The host never requests more than [`MAX_TRANSFER`] bytes, so a larger
+/// declaration cannot be satisfied by the fixed-size read buffer. Reject it as
+/// a protocol error rather than letting it drive an out-of-bounds slice or
+/// leave the receive loop waiting for bytes that cannot arrive.
+fn validate_declared_len(declared: usize) -> Result<()> {
+    if declared > MAX_TRANSFER {
+        return Err(Error::UsbTmc(format!(
+            "bulk-in payload length {declared} exceeds maximum transfer size {MAX_TRANSFER}"
+        )));
+    }
+    Ok(())
+}
+
+/// Return the end offset of a bulk-in payload, rejecting a short transfer.
+///
+/// `declared` is the payload length from the header and `filled` is how many
+/// bytes (header included) actually arrived. A zero-length packet can end the
+/// read early; that must be reported as an error rather than exposed as
+/// zero-filled payload bytes.
+fn payload_end(declared: usize, filled: usize) -> Result<usize> {
+    let end = HEADER_LEN + declared;
+    if filled < end {
+        return Err(Error::UsbTmc(format!(
+            "short bulk-in payload: received {} of {declared} declared bytes",
+            filled.saturating_sub(HEADER_LEN)
+        )));
+    }
+    Ok(end)
+}
+
 #[cfg(feature = "usb")]
 pub use real::UsbTmcTransport;
 
@@ -177,6 +209,10 @@ mod real {
                         }
                         let declared =
                             u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]) as usize;
+                        // The buffer is only HEADER_LEN + MAX_TRANSFER long, so
+                        // an over-long declaration could never be satisfied and
+                        // must not reach the slice below.
+                        validate_declared_len(declared)?;
                         payload_len = Some(declared);
                     }
                     if let Some(len) = payload_len
@@ -188,7 +224,8 @@ mod real {
 
                 let len = payload_len.unwrap_or(0);
                 let attributes = buf[8];
-                data.extend_from_slice(&buf[HEADER_LEN..HEADER_LEN + len]);
+                let end = payload_end(len, filled)?;
+                data.extend_from_slice(&buf[HEADER_LEN..end]);
 
                 if attributes & EOM != 0 || len == 0 {
                     break;
@@ -302,5 +339,24 @@ mod tests {
     #[test]
     fn test_terminator_is_newline() {
         assert_eq!(TERMINATOR, b'\n');
+    }
+
+    #[test]
+    fn test_declared_len_bounded_by_max_transfer() {
+        assert!(validate_declared_len(0).is_ok());
+        assert!(validate_declared_len(MAX_TRANSFER).is_ok());
+        match validate_declared_len(MAX_TRANSFER + 1) {
+            Err(Error::UsbTmc(message)) => assert!(message.contains("exceeds maximum")),
+            other => panic!("expected Error::UsbTmc, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_payload_end_rejects_short_transfer() {
+        assert_eq!(payload_end(4, HEADER_LEN + 4).unwrap(), HEADER_LEN + 4);
+        match payload_end(4, HEADER_LEN + 2) {
+            Err(Error::UsbTmc(message)) => assert!(message.contains("short bulk-in")),
+            other => panic!("expected Error::UsbTmc, got {other:?}"),
+        }
     }
 }

@@ -30,6 +30,19 @@ fn to_pyerr(err: omariglol_core::Error) -> PyErr {
     PyRuntimeError::new_err(err.to_string())
 }
 
+/// Convert a caller-supplied timeout in seconds into a [`Duration`].
+///
+/// Negative values (and NaN) clamp to zero, matching the previous behaviour.
+/// `+inf` and finite values outside [`Duration`]'s range are rejected instead
+/// of panicking inside `Duration::from_secs_f64`.
+pub(crate) fn timeout_from_secs(seconds: f64) -> PyResult<Duration> {
+    Duration::try_from_secs_f64(seconds.max(0.0)).map_err(|_| {
+        PyValueError::new_err(format!(
+            "timeout must be finite and representable as a duration, got {seconds}"
+        ))
+    })
+}
+
 /// Translate a script error into a Python exception, preserving cancellation
 /// and timeout so the engine can classify them when they surface.
 pub(crate) fn script_err_to_py(err: ScriptError) -> PyErr {
@@ -85,7 +98,7 @@ impl Instrument {
     /// Change the socket timeout, in seconds.
     #[setter]
     fn set_timeout(&mut self, seconds: f64) -> PyResult<()> {
-        let timeout = Duration::from_secs_f64(seconds.max(0.0));
+        let timeout = timeout_from_secs(seconds)?;
         self.session.set_timeout(timeout).map_err(to_pyerr)?;
         self.timeout = timeout;
         Ok(())
@@ -148,7 +161,8 @@ fn connect(
 
     let device = Device::from_address(address, kind).map_err(to_pyerr)?;
     let timeout = timeout
-        .map(|seconds| Duration::from_secs_f64(seconds.max(0.0)))
+        .map(timeout_from_secs)
+        .transpose()?
         .unwrap_or(defaults.timeout);
 
     let mut target = Target::from_device(&device, kind).with_timeout(timeout);
@@ -358,4 +372,20 @@ pub fn omariglol(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ScriptCancelled", m.py().get_type::<ScriptCancelled>())?;
     m.add("ScriptTimeout", m.py().get_type::<ScriptTimeout>())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_timeout_from_secs_rejects_unrepresentable_values() {
+        Python::with_gil(|_py| {
+            assert_eq!(timeout_from_secs(-1.0).unwrap(), Duration::ZERO);
+            assert_eq!(timeout_from_secs(f64::NAN).unwrap(), Duration::ZERO);
+            assert_eq!(timeout_from_secs(1.5).unwrap(), Duration::from_millis(1500));
+            assert!(timeout_from_secs(f64::INFINITY).is_err());
+            assert!(timeout_from_secs(f64::MAX).is_err());
+        });
+    }
 }

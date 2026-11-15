@@ -218,20 +218,31 @@ export function instrumentRunCommand(
  * Batch and routing
  * ---------------------------------------------------------------------- */
 
-/** Send commands to multiple instruments in parallel. */
+/**
+ * The outcome of one instrument in a batch call.
+ *
+ * The backend tags each entry so an error message can never be mistaken for a
+ * device response. Writes always return `{ status: "ok", value: null }` on
+ * success; queries return the response in `value`.
+ */
+export type BatchResult =
+  | { status: "ok"; value: string | null }
+  | { status: "error"; kind: string; message: string };
+
+/** Send commands to multiple instruments, one task per instrument. */
 export function instrumentBatchWrite(
   commands: Record<string, string>,
-): Promise<Record<string, string | null>> {
-  return invoke<Record<string, string | null>>("instrument_batch_write", {
+): Promise<Record<string, BatchResult>> {
+  return invoke<Record<string, BatchResult>>("instrument_batch_write", {
     request: { commands },
   });
 }
 
-/** Query multiple instruments in parallel. */
+/** Query multiple instruments, one task per instrument. */
 export function instrumentBatchQuery(
   commands: Record<string, string>,
-): Promise<Record<string, string | null>> {
-  return invoke<Record<string, string | null>>("instrument_batch_query", {
+): Promise<Record<string, BatchResult>> {
+  return invoke<Record<string, BatchResult>>("instrument_batch_query", {
     request: { commands },
   });
 }

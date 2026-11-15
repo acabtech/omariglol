@@ -43,6 +43,7 @@ use omariglol_core::trigger::Trigger;
 use omariglol_core::workspace::{Workspace as CoreWorkspace, now_millis};
 
 use crate::context;
+use crate::module::timeout_from_secs;
 
 /// The shared, mutable state behind a workspace and its instruments.
 struct WorkspaceData {
@@ -451,6 +452,7 @@ impl Workspace {
         port: Option<u16>,
         timeout: f64,
     ) -> PyResult<Py<WorkspaceInstrument>> {
+        let timeout = timeout_from_secs(timeout)?;
         let kind = match transport {
             "vxi11" => Transport::Vxi11,
             "raw" => Transport::Raw,
@@ -474,12 +476,11 @@ impl Workspace {
         if let Some(instrument) = data.inner.instrument_mut(&id) {
             instrument.config.transport = kind;
             instrument.config.port = port;
-            instrument.config.timeout_secs = timeout.max(0.0) as u64;
+            instrument.config.timeout_secs = timeout.as_secs();
         }
         let target = {
             let instrument = data.inner.instrument(&id).expect("just added");
-            let mut target = Target::from_device(&instrument.device, kind)
-                .with_timeout(std::time::Duration::from_secs_f64(timeout.max(0.0)));
+            let mut target = Target::from_device(&instrument.device, kind).with_timeout(timeout);
             if let Some(port) = port {
                 target = target.with_port(port);
             }
@@ -743,6 +744,7 @@ impl Workspace {
             .iter()
             .filter_map(|host| host.parse().ok())
             .collect();
+        let listen_timeout = timeout_from_secs(timeout)?;
         let options = DiscoveryOptions {
             use_broadcast,
             use_mdns,
@@ -750,7 +752,7 @@ impl Workspace {
             extra_hosts: extra,
             ttl_secs: ttl.max(0.0) as u64,
             incremental,
-            listen_timeout: std::time::Duration::from_secs_f64(timeout.max(0.0)),
+            listen_timeout,
             ..Default::default()
         };
         let engine = self.data.lock().unwrap().discovery.clone();

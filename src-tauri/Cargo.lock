@@ -34,7 +34,7 @@ dependencies = [
 
 [[package]]
 name = "android_system_properties"
-version = "0.1.6"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ae221649c9976a6f6c56ae1facf410f3ddb33cc661c4b7b61020a912d4237fbc"
 dependencies = [
@@ -1545,7 +1545,7 @@ dependencies = [
 
 [[package]]
 name = "iana-time-zone"
-version = "0.1.65"
+version = "0.1.75"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e31bc9ad994ba00e440a8aa5c9ef0ec67d5cb5e5cb0cc7f8b744a35b389cc470"
 dependencies = [
@@ -2376,7 +2376,7 @@ dependencies = [
 
 [[package]]
 name = "omariglol"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "dirs 6.0.0",
  "omariglol-core",
@@ -2392,7 +2392,7 @@ dependencies = [
 
 [[package]]
 name = "omariglol-core"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "base64 0.22.1",
  "rand",
@@ -2405,7 +2405,7 @@ dependencies = [
 
 [[package]]
 name = "omariglol-script"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "omariglol-core",
  "pyo3",
@@ -2653,7 +2653,7 @@ dependencies = [
 
 [[package]]
 name = "potential_utf"
-version = "0.1.6"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d83eb9bc6d8e5cf568e7a1101d60ee05e81ed50ea106026f3d18deeb046d7661"
 dependencies = [

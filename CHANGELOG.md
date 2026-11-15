@@ -6,6 +6,14 @@ semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.7] — 2026-11-15
+
+### Changed
+
+- **Omarchy bar widget/panel refactored (Codesign).** Reworked `omarchy/plugin/BarWidget.qml`
+  and `omarchy/plugin/Panel.qml` into standalone QML with direct `riglol` process integration
+  via `Model.js`.
+
 ### Fixed
 
 - **Trigger replacement no longer reports a false cycle.** `Workspace::add_trigger`

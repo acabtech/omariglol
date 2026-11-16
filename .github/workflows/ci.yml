@@ -71,6 +71,14 @@ jobs:
           rm -rf target
           ln -s "$CARGO_TARGET_DIR" target
 
+      - name: Repair cached Rust toolchain if corrupted
+        run: |
+          # Work around stale/corrupted rustup cache on the self-hosted runner
+          # (e.g. "Directory not empty (os error 39)" or component conflicts
+          # when updating the stable toolchain). Removing the toolchain lets
+          # rustup reinstall it cleanly while preserving download caches.
+          rm -rf "$RUSTUP_HOME/tmp" "$RUSTUP_HOME/toolchains/stable-x86_64-unknown-linux-gnu"
+
       - name: Install Rust toolchain (reused from RUSTUP_HOME)
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -136,6 +144,11 @@ jobs:
               git curl python webkit2gtk-4.1 gtk3 libsoup3 librsvg patchelf
 
       - uses: actions/checkout@v4
+
+      - name: Repair cached Rust toolchain if corrupted
+        run: |
+          # Work around stale/corrupted rustup cache on the self-hosted runner.
+          rm -rf "$RUSTUP_HOME/tmp" "$RUSTUP_HOME/toolchains/stable-x86_64-unknown-linux-gnu"
 
       - name: Install Rust toolchain (reused from RUSTUP_HOME)
         uses: dtolnay/rust-toolchain@stable

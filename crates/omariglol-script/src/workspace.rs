@@ -27,6 +27,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use pyo3::exceptions::{PyKeyError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -476,7 +477,7 @@ impl Workspace {
         if let Some(instrument) = data.inner.instrument_mut(&id) {
             instrument.config.transport = kind;
             instrument.config.port = port;
-            instrument.config.timeout_secs = timeout.as_secs();
+            instrument.config.timeout_secs = persisted_timeout_secs(timeout);
         }
         let target = {
             let instrument = data.inner.instrument(&id).expect("just added");
@@ -970,6 +971,19 @@ fn python_to_json(value: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
     ))
 }
 
+
+/// Convert a connection timeout into whole seconds for [`InstrumentConfig`].
+///
+/// Sub-second positive timeouts are rounded up so a value like 0.5s does not
+/// become 0 (which would break later reconnects). Zero stays zero.
+fn persisted_timeout_secs(timeout: Duration) -> u64 {
+    if timeout.is_zero() {
+        0
+    } else {
+        timeout.as_secs_f64().ceil().max(1.0) as u64
+    }
+}
+
 /// Register the workspace classes with the `omariglol` module.
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Workspace>()?;
@@ -1004,6 +1018,16 @@ mod tests {
         assert!(load_workspace(&dir, "missing").is_none());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+
+    #[test]
+    fn test_persisted_timeout_secs_rounds_subsecond_up() {
+        assert_eq!(persisted_timeout_secs(Duration::from_millis(500)), 1);
+        assert_eq!(persisted_timeout_secs(Duration::from_nanos(1)), 1);
+        assert_eq!(persisted_timeout_secs(Duration::from_millis(1500)), 2);
+        assert_eq!(persisted_timeout_secs(Duration::from_secs(3)), 3);
+        assert_eq!(persisted_timeout_secs(Duration::ZERO), 0);
     }
 
     #[test]

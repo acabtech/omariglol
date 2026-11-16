@@ -1,215 +1,132 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
+import qs.Commons
+import qs.Ui
 import "Model.js" as Model
 
-// omariglol bar widget — compact face in the Omarchy/Quickshell bar.
-// Left click: toggle panel. Middle click: measure all. Right click: refresh/discover context.
-// Uses Model.js for argv, parsing and labels; runs `riglol` via Process (no SCPI in QML).
-Rectangle {
-    id: root
+// omariglol — Omarchy bar widget.
+//
+// A compact mark showing how many instruments the last run measured, with a
+// panel that lists the workspace's instruments and fires a simultaneous
+// measurement of all of them. The widget never speaks SCPI: it shells out to
+// the `riglol` binary, so the protocol stays in one place and this file stays
+// small enough to audit (Omarchy plugins run unsandboxed).
+//
+// The panel owns the data (the report, the measuring flag, the error); this
+// widget reads it through the loader, the same way omarchy.weather does.
+BarWidget {
+  id: root
+  moduleName: "tech.alatcerdas.omariglol"
 
-    // --- settings (from manifest defaults / Omarchy settings UI) ---
-    property string binary: "riglol"
-    property string workspace: ""
-    property string scriptPath: ""
-    property string measureCommand: ""
+  // The panel owns the report; the bar face is a read-out of it.
+  readonly property var report: panelLoader.item ? panelLoader.item.report : null
+  readonly property bool measuring: panelLoader.item ? panelLoader.item.measuring === true : false
+  readonly property string lastError: panelLoader.item ? panelLoader.item.lastError : ""
+  readonly property string barText: Model.barLabel(root.report, root.measuring, root.lastError)
 
-    // --- runtime state ---
-    property bool measuring: false
-    property var lastReport: null
-    property string lastError: ""
-    property var discovered: []
-    property bool discovering: false
-    property string discoverySummary: ""
-    property bool panelOpen: false
+  function injectPanel() {
+    var target = panelLoader.item
+    if (!target) return
+    if ("bar" in target) target.bar = root.bar
+    if ("settings" in target) target.settings = root.settings
+    if ("anchorItem" in target) target.anchorItem = button
+    if ("hostWidget" in target) target.hostWidget = root
+  }
 
-    // --- om-* aligned palette (semantic, theme-friendly neutrals) ---
-    readonly property color omBg: "#14151a"
-    readonly property color omSurface: "#1b1d24"
-    readonly property color omRaised: "#23262f"
-    readonly property color omBorder: "#2e323d"
-    readonly property color omText: "#e6e8ee"
-    readonly property color omMuted: "#8b8d95"
-    readonly property color omAccent: "#6e9dff"
-    readonly property color omOk: "#4ade80"
-    readonly property color omWarn: "#fbbf24"
-    readonly property color omError: "#f87171"
-    readonly property color omInfo: "#60a5fa"
-    readonly property color omIdle: "#6b7280"
+  // Persist the Python script chosen from the panel's file picker. The update
+  // is mirrored locally first so the panel updates on the click itself, then
+  // written back to shell.json the same way the clock widget cycles formats.
+  function setScriptPath(path) {
+    var value = String(path || "")
+    if (value === String(setting("scriptPath", ""))) return
 
-    implicitWidth: faceRow.implicitWidth + 16
-    implicitHeight: 28
-    radius: 6
-    color: mouse.containsMouse ? omRaised : "transparent"
-    border.color: panelOpen ? omAccent : "transparent"
-    border.width: 1
+    var entry = { id: root.moduleName }
+    for (var key in root.settings) if (key !== "id") entry[key] = root.settings[key]
+    entry.scriptPath = value
 
-    function stateColor() {
-        var s = Model.widgetState(measuring, lastError)
-        if (s === "error") return omError
-        if (s === "measuring") return omInfo
-        if (!lastReport) return omIdle
-        // measured vs total heuristic
-        var total = lastReport.results ? lastReport.results.length : 0
-        var measured = 0
-        if (lastReport.results) {
-            for (var i = 0; i < lastReport.results.length; i++) {
-                var r = lastReport.results[i]
-                if (r.is_measurement && !r.error) measured++
-            }
-        }
-        if (total === 0) return omIdle
-        if (measured === total) return omOk
-        if (measured === 0) return omWarn
-        return omWarn
+    root.settings = entry
+    if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
+      root.bar.shell.updateEntryInline(root.moduleName, entry)
+  }
+
+  function refresh() {
+    if (panelLoader.item && panelLoader.item.refresh) panelLoader.item.refresh()
+  }
+
+  function measure() {
+    if (panelLoader.item && panelLoader.item.measure) panelLoader.item.measure()
+  }
+
+  function togglePanel() {
+    if (panelLoader.item && panelLoader.item.toggle) panelLoader.item.toggle()
+  }
+
+  // Shape contract for shell.summon/hide/toggle routing (Bar.findPanelWidget
+  // requires open/close/opened on the bar-widget root). Open maps to the
+  // panel's hotkey path so summoning suppresses the center hover reveal.
+  readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
+
+  function open() {
+    if (panelLoader.item && panelLoader.item.openFromHotkey) panelLoader.item.openFromHotkey()
+  }
+
+  function close() {
+    if (panelLoader.item && panelLoader.item.close) panelLoader.item.close()
+  }
+
+  // Forwarded so this widget can stand in for the panel as the bar's popout
+  // identity: Bar.requestPopout prefers closeForPopoutSwitch over close, and
+  // KeyboardPanel reads popoutSwitchClosing back off its owner.
+  readonly property bool popoutSwitchClosing: panelLoader.item ? panelLoader.item.popoutSwitchClosing === true : false
+
+  function closeForPopoutSwitch() {
+    if (panelLoader.item) panelLoader.item.closeForPopoutSwitch()
+  }
+
+  implicitWidth: button.implicitWidth
+  implicitHeight: button.implicitHeight
+
+  onBarChanged: injectPanel()
+  onSettingsChanged: injectPanel()
+
+  Loader {
+    id: panelLoader
+    active: true
+    source: Qt.resolvedUrl("Panel.qml")
+    visible: false
+    onLoaded: {
+      root.injectPanel()
+      Qt.callLater(root.injectPanel)
     }
+  }
 
-    function runMeasure() {
-        if (measuring) return
-        lastError = ""
-        measuring = true
-        measureProc.running = false
-        measureProc.buffer = ""
-        measureProc.command = scriptPath && scriptPath.length > 0
-            ? Model.scriptCommand(binary, scriptPath)
-            : Model.measureCommand(binary, workspace, measureCommand)
-        measureProc.running = true
-    }
+  IpcHandler {
+    target: "tech.alatcerdas.omariglol"
 
-    function runDiscover() {
-        if (discovering) return
-        discovering = true
-        discoverySummary = ""
-        discoverProc.running = false
-        discoverProc.buffer = ""
-        discoverProc.command = Model.discoverCommand(binary, workspace)
-        discoverProc.running = true
-    }
+    function open(): void { root.open() }
+    function close(): void { root.close() }
+    function show(): void { root.open() }
+    function hide(): void { root.close() }
+    function toggle(): void { root.togglePanel() }
+    function refresh(): void { root.refresh() }
+    function measure(): void { root.measure() }
+  }
 
-    function pickScript() {
-        pickerProc.running = false
-        pickerProc.buffer = ""
-        pickerProc.command = Model.filePickerCommand()
-        pickerProc.running = true
-    }
+  WidgetButton {
+    id: button
+    anchors.fill: parent
+    bar: root.bar
+    text: root.barText
+    labelVisible: true
+    // Tooltip suppressed: the panel is the detail view.
+    tooltipText: ""
 
-    RowLayout {
-        id: faceRow
-        anchors.centerIn: parent
-        spacing: 6
-
-        Rectangle {
-            width: 7; height: 7; radius: 4
-            color: root.stateColor()
-            Layout.alignment: Qt.AlignVCenter
-        }
-        Text {
-            text: Model.barLabel(lastReport, measuring, lastError)
-            color: lastError ? omError : omText
-            font.pixelSize: 12
-            font.family: "JetBrains Mono"
-            Layout.alignment: Qt.AlignVCenter
-        }
+    onPressed: function(b) {
+      if (b === Qt.MiddleButton) root.measure()
+      else if (b === Qt.RightButton) root.refresh()
+      else root.togglePanel()
     }
-
-    MouseArea {
-        id: mouse
-        anchors.fill: parent
-        hoverEnabled: true
-        acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
-        cursorShape: Qt.PointingHandCursor
-        onClicked: function(ev) {
-            if (ev.button === Qt.LeftButton) {
-                panelOpen = !panelOpen
-            } else if (ev.button === Qt.MiddleButton) {
-                runMeasure()
-            } else if (ev.button === Qt.RightButton) {
-                runDiscover()
-                panelOpen = true
-            }
-        }
-    }
-
-    // --- panel popup ---
-    Loader {
-        id: panelLoader
-        active: panelOpen
-        source: "Panel.qml"
-        onLoaded: {
-            item.anchorItem = root
-            item.widget = root
-            item.open = true
-        }
-    }
-    Connections {
-        target: panelLoader.item
-        ignoreUnknownSignals: true
-        function onClosed() { panelOpen = false }
-    }
-
-    // --- processes ---
-    Process {
-        id: measureProc
-        property string buffer: ""
-        stdout: SplitParser {
-            onRead: data => { measureProc.buffer += data + "\n" }
-        }
-        stderr: SplitParser {
-            onRead: data => { measureProc.buffer += data + "\n" }
-        }
-        onExited: (code, status) => {
-            root.measuring = false
-            var report = Model.parseReport(measureProc.buffer)
-            if (report) {
-                root.lastReport = report
-                root.lastError = ""
-            } else if (code !== 0) {
-                root.lastError = Model.firstLine(measureProc.buffer) || ("exit " + code)
-            } else {
-                // script run or non-report output
-                root.lastError = ""
-            }
-            measureProc.buffer = ""
-        }
-    }
-
-    Process {
-        id: discoverProc
-        property string buffer: ""
-        stdout: SplitParser {
-            onRead: data => { discoverProc.buffer += data + "\n" }
-        }
-        stderr: SplitParser {
-            onRead: data => { discoverProc.buffer += data + "\n" }
-        }
-        onExited: (code, status) => {
-            root.discovering = false
-            var report = Model.parseDiscovery(discoverProc.buffer)
-            if (report) {
-                root.discovered = report.found || []
-                root.discoverySummary = Model.discoverySummary(report)
-                root.lastError = ""
-            } else if (code !== 0) {
-                root.lastError = Model.firstLine(discoverProc.buffer) || ("discover exit " + code)
-            }
-            discoverProc.buffer = ""
-        }
-    }
-
-    Process {
-        id: pickerProc
-        property string buffer: ""
-        stdout: SplitParser {
-            onRead: data => { pickerProc.buffer += data + "\n" }
-        }
-        onExited: (code, status) => {
-            if (code === 0) {
-                var path = String(pickerProc.buffer || "").trim().split("\n")[0]
-                if (path) root.scriptPath = path
-            }
-            pickerProc.buffer = ""
-        }
-    }
+  }
 }

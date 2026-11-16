@@ -1571,27 +1571,14 @@ pub async fn capture_screenshot(
         None => first_connected(&state)?,
     };
 
-    let (device, transport_kind, port, timeout) = {
-        let manager = state.manager.lock().unwrap();
-        let workspace = manager.active().ok_or_else(no_workspace)?;
-        let instrument = workspace
-            .instrument(&id)
-            .ok_or_else(|| no_instrument(&id))?;
-        (
-            instrument.device.clone(),
-            instrument.config.transport,
-            instrument.config.port,
-            instrument.config.timeout(),
-        )
-    };
-
     let command = request.command;
     tauri::async_runtime::spawn_blocking(move || {
-        let shot = screenshot::capture_from_device(
-            &device,
-            transport_kind,
-            port,
-            timeout,
+        let mut sessions = state.sessions.lock().unwrap();
+        let connection = sessions.get_mut(&id).ok_or_else(no_session)?;
+        let idn = connection.identify()?;
+        let shot = screenshot::capture(
+            connection.session_mut()?.transport_mut(),
+            &idn,
             command.as_deref(),
         )?;
         Ok(ScreenshotResponse::from(shot))

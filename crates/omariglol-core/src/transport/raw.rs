@@ -120,8 +120,16 @@ impl ScpiTransport for RawTransport {
                         )));
                     }
                 }
-                let take = total.min(self.pending.len());
-                let block: Vec<u8> = self.pending.drain(..take).collect();
+                if self.pending.len() < total {
+                    return Err(Error::Io(std::io::Error::new(
+                        ErrorKind::UnexpectedEof,
+                        format!(
+                            "short IEEE-488.2 block: expected {total} bytes, got {}",
+                            self.pending.len()
+                        ),
+                    )));
+                }
+                let block: Vec<u8> = self.pending.drain(..total).collect();
                 self.consume_block_terminator();
                 return Ok(block);
             }
@@ -365,6 +373,26 @@ mod tests {
         assert_eq!(transport.receive().unwrap(), expected);
         let _ = handle.join();
     }
+
+    #[test]
+    fn test_raw_receive_definite_block_short_eof() {
+        // A definite-length block whose payload is cut short before the declared
+        // length must be reported as an error, not returned as a truncated block.
+        let (addr, handle) = spawn_server(|mut s| {
+            // Declares 10 bytes total (#15 + 5-byte payload), but only 3 payload bytes sent.
+            let _ = s.write_all(b"#15hel");
+            let _ = s.flush();
+            // Close immediately so the receiver sees EOF.
+        });
+        let mut transport = connect_to(addr);
+        let err = transport.receive().unwrap_err();
+        assert!(matches!(
+            err,
+            Error::Io(ref e) if e.kind() == ErrorKind::UnexpectedEof
+        ));
+        let _ = handle.join();
+    }
+
 
     #[test]
     fn test_raw_bytes_past_terminator_buffered() {

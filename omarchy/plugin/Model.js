@@ -209,14 +209,39 @@ function discoveredGlyph(instrument) {
 function discoveryName(instrument) {
   var entry = instrument || {};
   var device = entry.device || {};
-  var name = entry.model || entry.idn || device.mdns_name || device.hostname || "";
-  return String(name) || discoveryAddress(entry);
+  var name = entry.model || entry.product || device.mdns_name || device.hostname || "";
+  var cleaned = String(name || "").replace(/\uFFFD/g, "").replace(/[^\x20-\x7E\u00A0-\uFFFF]/g, "").trim();
+  if (cleaned) return cleaned;
+  var addr = discoveryAddress(entry);
+  return addr || "Unknown device";
+}
+
+/** Format a USB selector object from a serialized device. */
+function usbSelectorString(usb) {
+  if (!usb) return "";
+  var vid = Number(usb.vendor || 0);
+  var pid = Number(usb.product || 0);
+  var hex = function(n) {
+    var s = n.toString(16).toUpperCase();
+    while (s.length < 4) s = "0" + s;
+    return "0x" + s;
+  };
+  var out = "usb:" + hex(vid) + ":" + hex(pid);
+  if (usb.serial) out += ":" + usb.serial;
+  else if (usb.bus !== undefined && usb.bus !== null
+      && usb.address !== undefined && usb.address !== null)
+    out += ":" + usb.bus + "." + usb.address;
+  return out;
 }
 
 /** The address of a discovery entry. */
 function discoveryAddress(instrument) {
-  var device = (instrument && instrument.device) || {};
-  return String(device.address || "");
+  var entry = instrument || {};
+  var device = entry.device || {};
+  if (device.usb) return usbSelectorString(device.usb);
+  var addr = String(device.address || "");
+  if (addr === "0.0.0.0" || addr === "::") return "";
+  return addr;
 }
 
 /** The discovery method, in the CLI's kebab-case form. */
@@ -233,9 +258,11 @@ function discoveryMeta(instrument) {
   var method = discoveryMethod(entry);
   if (address) parts.push(address);
   if (method) parts.push(method);
-  if (entry.vendor) parts.push(entry.vendor);
-  if (entry.serial) parts.push(entry.serial);
-  return parts.join(" \u00B7 ");
+  var vendor = String(entry.vendor || "").replace(/\uFFFD/g, "").trim();
+  var serial = String(entry.serial || "").replace(/\uFFFD/g, "").trim();
+  if (vendor) parts.push(vendor);
+  if (serial) parts.push(serial);
+  return parts.filter(function(p) { return p && p !== "0.0.0.0"; }).join(" \u00B7 ");
 }
 
 /** A one-line summary of a discovery report. */

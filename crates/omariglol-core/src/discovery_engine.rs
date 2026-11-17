@@ -595,12 +595,14 @@ impl DiscoveryEngine {
         if let Some(handle) = usb_handle
             && let Ok(devices) = handle.join()
         {
-            discovered.extend(
-                devices
-                    .into_iter()
-                    .filter(|info| info.is_usbtmc)
-                    .map(|info| CachedInstrument::from_usb(&info, options.ttl_secs)),
-            );
+            discovered.extend(devices.into_iter().filter_map(|info| {
+                let is_nanodla_bootloader = info.id.vendor == 0x1d50 && info.id.product == 0x608c;
+                if info.is_usbtmc || is_nanodla_bootloader {
+                    Some(CachedInstrument::from_usb(&info, options.ttl_secs))
+                } else {
+                    None
+                }
+            }));
         }
         if !discovered.is_empty() {
             let mut cache = self.cache.lock().unwrap();

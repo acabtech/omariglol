@@ -6,7 +6,9 @@
 //! measurement fan-out in [`crate::measure`].
 //!
 //! Instruments without an `autoscale` operation — everything that is not an
-//! oscilloscope — are reported as skipped rather than failed.
+//! oscilloscope — are reported as skipped rather than failed. After a
+//! successful autoscale, acquisition is resumed (`run`) when the driver exposes
+//! it so scopes such as the Rigol DS1000Z/DS1054Z do not remain stopped.
 
 use std::time::Instant;
 
@@ -136,7 +138,14 @@ fn autoscale_one(instrument: &Instrument) -> AutoscaleResult {
     };
 
     match session.send(&command.scpi) {
-        Ok(()) => result.executed = true,
+        Ok(()) => {
+            result.executed = true;
+            // Rigol DS1000Z-class scopes can leave acquisition stopped after
+            // `:AUT`. Resume by default so the display keeps updating.
+            if let Some(run) = driver.command("run") {
+                let _ = session.send(&run.scpi);
+            }
+        }
         Err(err) => result.error = Some(err.to_string()),
     }
 

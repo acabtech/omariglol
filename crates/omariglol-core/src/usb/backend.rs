@@ -5,7 +5,8 @@
 //! [`UsbHandle`]; the USBTMC driver above it only sees bulk and control
 //! transfers.
 
-use std::time::Duration;
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use rusb::{Context, DeviceHandle, Direction, TransferType, UsbContext};
 
@@ -22,8 +23,216 @@ const USBTMC_CHECK_CLEAR_STATUS: u8 = 6;
 /// Device-to-host, class, interface.
 const CTL_IN_CLASS_INTERFACE: u8 = 0xA1;
 
+/// Cypress/Anchor FX2 vendor request to access CPUCS/RAM (used for RAM download).
+const FX2_REQ_RAM: u8 = 0xA0;
+/// FX2 CPUCS register address.
+const FX2_CPUCS: u16 = 0xE600;
+
+const NANODLA_BOOTLOADER_VID: u16 = 0x1d50;
+const NANODLA_BOOTLOADER_PID: u16 = 0x608c;
+const NANODLA_USBTMC_VID: u16 = 0x0912;
+const NANODLA_USBTMC_PID: u16 = 0x1100;
+
 fn map_err(err: rusb::Error) -> Error {
     Error::Usb(err.to_string())
+}
+
+/// Keep printable text and drop control/replacement noise from USB strings.
+fn sanitize_usb_string(s: &str) -> String {
+    let cleaned: String = s
+        .chars()
+        .filter(|c| !c.is_control() && *c != '\u{FFFD}')
+        .collect();
+    cleaned.trim().to_string()
+}
+
+fn read_usb_strings(
+    handle: &DeviceHandle<Context>,
+    descriptor: &rusb::DeviceDescriptor,
+) -> (Option<String>, Option<String>, Option<String>) {
+    let timeout = Duration::from_millis(250);
+    let langs = handle.read_languages(timeout).ok().unwrap_or_default();
+    let lang = langs
+        .iter()
+        .find(|l| l.lang_id() == 0x0409)
+        .copied()
+        .or_else(|| langs.into_iter().next());
+
+    let (mut serial, mut manufacturer, mut product) = if let Some(lang) = lang {
+        (
+            handle
+                .read_serial_number_string(lang, descriptor, timeout)
+                .ok(),
+            handle
+                .read_manufacturer_string(lang, descriptor, timeout)
+                .ok(),
+            handle.read_product_string(lang, descriptor, timeout).ok(),
+        )
+    } else {
+        (None, None, None)
+    };
+
+    if serial.is_none() {
+        serial = handle.read_serial_number_string_ascii(descriptor).ok();
+    }
+    if manufacturer.is_none() {
+        manufacturer = handle.read_manufacturer_string_ascii(descriptor).ok();
+    }
+    if product.is_none() {
+        product = handle.read_product_string_ascii(descriptor).ok();
+    }
+
+    (
+        serial.map(|s| sanitize_usb_string(&s)).filter(|s| !s.is_empty()),
+        manufacturer
+            .map(|s| sanitize_usb_string(&s))
+            .filter(|s| !s.is_empty()),
+        product.map(|s| sanitize_usb_string(&s)).filter(|s| !s.is_empty()),
+    )
+}
+
+/// Identify a nanoDLA device and normalize its display strings.
+fn identify_nanodla(
+    vendor: u16,
+    product: u16,
+    manufacturer: Option<String>,
+    mut model: Option<String>,
+) -> (Option<String>, Option<String>) {
+    if vendor == NANODLA_BOOTLOADER_VID && product == NANODLA_BOOTLOADER_PID {
+        return (
+            Some(manufacturer.unwrap_or_else(|| "MuseLab".to_string())),
+            Some("nanoDLA (FX2 bootloader)".to_string()),
+        );
+    }
+    if vendor == NANODLA_USBTMC_VID && product == NANODLA_USBTMC_PID {
+        let man = manufacturer.unwrap_or_else(|| "MuseLab".to_string());
+        let prod = match model.take() {
+            Some(p) if !p.is_empty() && p != "USB Device" => p,
+            _ => "nanoDLA USBTMC".to_string(),
+        };
+        let prod = if prod.to_ascii_lowercase().contains("nanodla") {
+            prod
+        } else {
+            "nanoDLA USBTMC".to_string()
+        };
+        return (Some(man), Some(prod));
+    }
+    (manufacturer, model)
+}
+
+/// Parse an Intel HEX (.ihx) image into contiguous (address, data) chunks.
+fn parse_ihex(data: &str) -> std::result::Result<Vec<(u32, Vec<u8>)>, String> {
+    let mut seg: u32 = 0;
+    let mut mem: std::collections::BTreeMap<u32, u8> = std::collections::BTreeMap::new();
+    for line in data.lines() {
+        let line = line.trim();
+        if line.is_empty() || !line.starts_with(':') {
+            continue;
+        }
+        let bytes = (2..line.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&line[i..i + 2], 16).map_err(|e| e.to_string()))
+            .collect::<std::result::Result<Vec<u8>, _>>()?;
+        if bytes.len() < 5 {
+            continue;
+        }
+        let n = bytes[0] as usize;
+        let addr = ((bytes[1] as u32) << 8) | bytes[2] as u32;
+        let rec = bytes[3];
+        if bytes.len() < 4 + n {
+            continue;
+        }
+        let payload = &bytes[4..4 + n];
+        match rec {
+            0x00 => {
+                let a = seg + addr;
+                for (i, b) in payload.iter().enumerate() {
+                    mem.insert(a + i as u32, *b);
+                }
+            }
+            0x01 => break,
+            0x02 if payload.len() >= 2 => {
+                seg = (((payload[0] as u32) << 8) | payload[1] as u32) << 4;
+            }
+            0x04 if payload.len() >= 2 => {
+                seg = (((payload[0] as u32) << 8) | payload[1] as u32) << 16;
+            }
+            _ => {}
+        }
+    }
+    if mem.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut chunks: Vec<(u32, Vec<u8>)> = Vec::new();
+    let mut iter = mem.into_iter();
+    let (mut start, b0) = iter.next().unwrap();
+    let mut cur = vec![b0];
+    let mut prev = start;
+    for (a, b) in iter {
+        if a == prev + 1 {
+            cur.push(b);
+        } else {
+            chunks.push((start, std::mem::take(&mut cur)));
+            start = a;
+            cur.push(b);
+        }
+        prev = a;
+    }
+    chunks.push((start, cur));
+    Ok(chunks)
+}
+
+fn nanodla_firmware_candidates() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    if let Ok(p) = std::env::var("OMARIGLOL_NANODLA_USBTMC_FW") {
+        out.push(PathBuf::from(p));
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        let home = PathBuf::from(home);
+        out.push(home.join("projects/nanoDLA-USBTMC/firmware/build/usbtmc-usbtmc/nanodla-usbtmc-usbtmc.ihx"));
+        out.push(home.join("projects/nanoDLA-USBTMC/dist/nanodla-usbtmc-usbtmc.ihx"));
+    }
+    out
+}
+
+/// Try to RAM-load the nanoDLA USBTMC firmware into an FX2 bootloader device.
+///
+/// Returns true if a load was attempted (successfully sent).
+fn try_load_nanodla_firmware(device: &rusb::Device<Context>) -> bool {
+    let fw_path = nanodla_firmware_candidates().into_iter().find(|p| p.is_file());
+    let Some(fw_path) = fw_path else { return false };
+    let Ok(ihx) = std::fs::read_to_string(&fw_path) else { return false };
+    let Ok(chunks) = parse_ihex(&ihx) else { return false };
+    if chunks.is_empty() {
+        return false;
+    }
+
+    let Ok(handle) = device.open() else { return false };
+    let timeout = Duration::from_millis(1000);
+
+    // Reset CPU (hold in reset), download, release.
+    let _ = handle.write_control(0x40, FX2_REQ_RAM, FX2_CPUCS, 0, &[1], timeout);
+    for (addr, data) in &chunks {
+        let mut off = 0usize;
+        while off < data.len() {
+            let end = std::cmp::min(off + 4096, data.len());
+            let part = &data[off..end];
+            let a = addr + off as u32;
+            if a > 0xFFFF {
+                break;
+            }
+            if handle
+                .write_control(0x40, FX2_REQ_RAM, a as u16, 0, part, timeout)
+                .is_err()
+            {
+                let _ = handle.write_control(0x40, FX2_REQ_RAM, FX2_CPUCS, 0, &[0], timeout);
+                return false;
+            }
+            off = end;
+        }
+    }
+    let _ = handle.write_control(0x40, FX2_REQ_RAM, FX2_CPUCS, 0, &[0], timeout);
+    true
 }
 
 /// Find the USBTMC interface and its bulk endpoints in a device's active config.
@@ -107,7 +316,10 @@ impl UsbHandle {
 
             // Serial filter, which needs the open handle to read the string.
             if let Some(serial) = &selector.serial {
-                let found = handle.read_serial_number_string_ascii(&descriptor).ok();
+                let found = read_usb_strings(&handle, &descriptor)
+                    .0
+                    .or_else(|| handle.read_serial_number_string_ascii(&descriptor).ok())
+                    .map(|s| sanitize_usb_string(&s));
                 if found.as_deref() != Some(serial.as_str()) {
                     continue;
                 }
@@ -221,12 +433,7 @@ impl Drop for UsbHandle {
     }
 }
 
-/// Enumerate attached USB devices, annotating which expose a USBTMC interface.
-pub fn enumerate() -> Vec<UsbDeviceInfo> {
-    let context = match Context::new() {
-        Ok(context) => context,
-        Err(_) => return Vec::new(),
-    };
+fn enumerate_once(context: &Context) -> Vec<UsbDeviceInfo> {
     let devices = match context.devices() {
         Ok(devices) => devices,
         Err(_) => return Vec::new(),
@@ -241,13 +448,15 @@ pub fn enumerate() -> Vec<UsbDeviceInfo> {
         let usbtmc = find_usbtmc_interface(&device);
 
         let (serial, manufacturer, product) = match device.open() {
-            Ok(handle) => (
-                handle.read_serial_number_string_ascii(&descriptor).ok(),
-                handle.read_manufacturer_string_ascii(&descriptor).ok(),
-                handle.read_product_string_ascii(&descriptor).ok(),
-            ),
+            Ok(handle) => read_usb_strings(&handle, &descriptor),
             Err(_) => (None, None, None),
         };
+        let (manufacturer, product) = identify_nanodla(
+            descriptor.vendor_id(),
+            descriptor.product_id(),
+            manufacturer,
+            product,
+        );
 
         out.push(UsbDeviceInfo {
             id: UsbId::new(descriptor.vendor_id(), descriptor.product_id()),
@@ -261,4 +470,48 @@ pub fn enumerate() -> Vec<UsbDeviceInfo> {
         });
     }
     out
+}
+
+/// Enumerate attached USB devices, annotating which expose a USBTMC interface.
+///
+/// If a MuseLab nanoDLA is found in FX2 bootloader mode (`1d50:608c`, OpenMoko
+/// Fx2lafw) and a custom USBTMC RAM firmware image is available, it is loaded
+/// automatically and the bus is re-enumerated so the device appears as a USBTMC
+/// instrument (`0912:1100`).
+pub fn enumerate() -> Vec<UsbDeviceInfo> {
+    let context = match Context::new() {
+        Ok(context) => context,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut devices = enumerate_once(&context);
+
+    // Auto-load custom USBTMC firmware into nanoDLA bootloader devices.
+    if let Ok(list) = context.devices() {
+        let mut loaded = false;
+        for device in list.iter() {
+            let Ok(desc) = device.device_descriptor() else { continue };
+            if desc.vendor_id() == NANODLA_BOOTLOADER_VID
+                && desc.product_id() == NANODLA_BOOTLOADER_PID
+                && try_load_nanodla_firmware(&device)
+            {
+                loaded = true;
+            }
+        }
+        if loaded {
+            // Give the device time to re-enumerate with the new firmware.
+            let deadline = Instant::now() + Duration::from_millis(2500);
+            while Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(250));
+                devices = enumerate_once(&context);
+                if devices.iter().any(|d| {
+                    d.id.vendor == NANODLA_USBTMC_VID && d.id.product == NANODLA_USBTMC_PID
+                }) {
+                    break;
+                }
+            }
+        }
+    }
+
+    devices
 }

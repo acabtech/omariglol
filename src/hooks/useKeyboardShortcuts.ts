@@ -20,7 +20,7 @@ export function isTextEntry(target: EventTarget | null): boolean {
 }
 
 /**
- * Bind `Ctrl+1` … `Ctrl+5` to the workbench sections.
+ * Bind `Ctrl+1` … `Ctrl+8` to the workbench panels.
  *
  * `onSelect` receives a zero-based section index. The binding never conflicts
  * with typing, so it stays active while a field has focus.
@@ -30,7 +30,7 @@ export function useSectionShortcuts(onSelect: (index: number) => void): void {
     const handler = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
       const index = Number(event.key) - 1;
-      if (Number.isInteger(index) && index >= 0 && index <= 4) {
+      if (Number.isInteger(index) && index >= 0 && index <= 7) {
         event.preventDefault();
         onSelect(index);
       }

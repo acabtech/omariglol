@@ -63,6 +63,29 @@ Panel {
   readonly property bool hasScript: root.scriptPath !== ""
   readonly property bool busy: root.measuring || root.runningScript
   readonly property bool anyBusy: root.busy || root.autoscaling || root.detecting || root.pickingScript
+
+  // Honest, text-labelled status. The colour is only reinforcement; the word
+  // is always shown alongside the dot (DESIGN.md §2: never colour-only).
+  // Commons.Color exposes foreground/background/accent/urgent/muted only, so
+  // "ok" maps to accent, "idle" to muted, "error" to urgent.
+  function statusWord(result) {
+    if (!result) return "idle"
+    if (result.error) return "error"
+    if (result.is_measurement) return "ok"
+    return "idle"
+  }
+
+  function statusColor(result) {
+    if (!result) return Commons.Color.muted
+    if (result.error) return Commons.Color.urgent
+    if (result.is_measurement) return Commons.Color.accent
+    return Commons.Color.muted
+  }
+
+  function statusFill(result) {
+    if (!result || statusWord(result) === "idle") return "transparent"
+    return Util.alpha(statusColor(result), 0.08)
+  }
   readonly property string triggerLabel: root.hasScript ? "RUN SCRIPT" : "MEASURE ALL"
   readonly property string detectLabel: root.detecting
     ? "SCANNING\u2026"
@@ -581,25 +604,65 @@ Panel {
                   font.pixelSize: Style.font.body
                 }
 
-                Text {
-                  id: value
+                // Status cluster: dot + word + reading, all right-aligned as a
+                // unit against the row's right edge. The dot's meaning is
+                // duplicated by the word beside it (DESIGN.md §2: never
+                // colour-only). An errored reading keeps the urgent tint on
+                // the value itself, as the spec's "value or ! error" calls for,
+                // now backed up by the dot rather than carried alone.
+                Item {
+                  id: rowStatus
                   anchors.right: parent.right
                   anchors.rightMargin: Style.space(16)
                   anchors.verticalCenter: parent.verticalCenter
-                  width: Style.space(96)
-                  horizontalAlignment: Text.AlignRight
-                  elide: Text.ElideRight
-                  text: Model.resultValue(modelData)
-                  color: modelData.error ? Commons.Color.urgent : root.contentForeground
-                  font.family: root.contentFontFamily
-                  font.pixelSize: Style.font.body
+                  width: statusValue.width + statusWordText.width + statusDot.width + Style.space(18)
+                  height: Style.space(22)
+
+                  Text {
+                    id: statusValue
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Style.space(96)
+                    horizontalAlignment: Text.AlignRight
+                    elide: Text.ElideRight
+                    text: Model.resultValue(modelData)
+                    color: modelData.error ? Commons.Color.urgent : root.contentForeground
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.body
+                  }
+
+                  Text {
+                    id: statusWordText
+                    anchors.right: statusValue.left
+                    anchors.rightMargin: Style.space(8)
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: root.statusWord(modelData)
+                    color: Qt.darker(root.statusColor(modelData), 1.3)
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.caption
+                    font.bold: true
+                    font.letterSpacing: 1
+                  }
+
+                  Rectangle {
+                    id: statusDot
+                    anchors.right: statusWordText.left
+                    anchors.rightMargin: Style.space(8)
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Style.space(8)
+                    height: Style.space(8)
+                    radius: width / 2
+                    color: root.statusColor(modelData)
+                    border.width: Style.spacing.hairline
+                    border.color: root.statusFill(modelData)
+                  }
                 }
 
                 Column {
                   id: labelColumn
                   anchors.left: glyph.right
                   anchors.leftMargin: Style.space(10)
-                  anchors.right: value.left
+                  anchors.right: rowStatus.left
                   anchors.rightMargin: Style.space(10)
                   anchors.verticalCenter: parent.verticalCenter
                   spacing: Style.space(1)

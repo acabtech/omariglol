@@ -36,7 +36,7 @@ use omariglol_core::discovery_engine::DEFAULT_TTL_SECS;
 use omariglol_core::discovery_engine::{
     CachedInstrument, DiscoveryEngine, DiscoveryEvent, DiscoveryOptions, DiscoveryReport,
 };
-use omariglol_core::driver::InstrumentDriver;
+use omariglol_core::driver::{InstrumentDriver, instrument_type_for_usb};
 use omariglol_core::error::Error;
 use omariglol_core::instrument::{Instrument, InstrumentId, InstrumentState};
 use omariglol_core::netconfig::{self, NetworkConfig};
@@ -309,12 +309,22 @@ pub struct InstrumentView {
 impl From<&Instrument> for InstrumentView {
     fn from(instrument: &Instrument) -> Self {
         let driver = instrument.idn.as_deref().map(InstrumentDriver::from_idn);
-        let (instrument_type, glyph) = match &driver {
-            Some(driver) => (
+        // A device with no `*IDN?` may still be a first-class USB instrument
+        // (e.g. the NI USB-6009 DAQ, which speaks no SCPI at all). Fall back to
+        // descriptor-based recognition. The `(Some(driver), _)` arm below takes
+        // precedence, so this is only consulted when there is no IDN.
+        let usb_type = instrument
+            .device
+            .usb
+            .as_ref()
+            .and_then(|selector| instrument_type_for_usb(selector.vendor, selector.product));
+        let (instrument_type, glyph) = match (&driver, &usb_type) {
+            (Some(driver), _) => (
                 driver.instrument_type.label().to_string(),
                 driver.instrument_type.glyph().to_string(),
             ),
-            None => ("instrument".to_string(), "inst".to_string()),
+            (None, Some(kind)) => (kind.label().to_string(), kind.glyph().to_string()),
+            (None, None) => ("instrument".to_string(), "inst".to_string()),
         };
         InstrumentView {
             id: instrument.id.to_string(),

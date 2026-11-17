@@ -463,10 +463,18 @@ fn enumerate_once(context: &Context) -> Vec<UsbDeviceInfo> {
             bus: device.bus_number(),
             address: device.address(),
             serial,
-            manufacturer,
+            manufacturer: manufacturer.or_else(|| {
+                crate::driver::recognize_usb(descriptor.vendor_id(), descriptor.product_id())
+                    .map(|profile| profile.manufacturer.to_string())
+            }),
             product,
             interface_number: usbtmc.map(|(interface, _, _)| interface).unwrap_or(0),
             is_usbtmc: usbtmc.is_some(),
+            // A first-class non-SCPI USB device (the NI USB-6009 DAQ, say) is
+            // recognised by its vendor/product id. It has no USBTMC interface
+            // and is never probed with `*IDN?`, but discovery still lists it.
+            is_daq: crate::driver::recognize_usb(descriptor.vendor_id(), descriptor.product_id())
+                .is_some(),
         });
     }
     out

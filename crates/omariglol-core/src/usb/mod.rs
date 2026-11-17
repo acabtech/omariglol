@@ -65,6 +65,11 @@ pub struct UsbDeviceInfo {
     pub interface_number: u8,
     /// True when the device exposes a USBTMC interface.
     pub is_usbtmc: bool,
+    /// True when the device is a first-class non-SCPI instrument recognised by
+    /// its USB vendor/product id — the NI USB-6009 DAQ, say. Such a device is
+    /// listed and labelled by discovery but speaks no SCPI, so it has no
+    /// `*IDN?` command surface.
+    pub is_daq: bool,
 }
 
 impl UsbDeviceInfo {
@@ -94,11 +99,24 @@ impl UsbDeviceInfo {
         true
     }
 
-    /// A human label: product string, then vendor/product ids.
+    /// A human label: a recognised device's profile name, then the product
+    /// string, then the bare vendor/product ids.
     pub fn label(&self) -> String {
-        match &self.product {
-            Some(product) => product.clone(),
-            None => format!("{:04x}:{:04x}", self.id.vendor, self.id.product),
+        crate::driver::usb_device_label(self.id.vendor, self.id.product, self.product.as_deref())
+    }
+
+    /// The protocol driver this device is reachable through.
+    ///
+    /// `usbtmc` for a SCPI-over-USB instrument, `daq` for a recognised
+    /// non-SCPI USB device, and `-` for anything else. This is what the USB
+    /// list and discovery surface show.
+    pub fn driver_kind(&self) -> &'static str {
+        if self.is_usbtmc {
+            "usbtmc"
+        } else if self.is_daq {
+            "daq"
+        } else {
+            "-"
         }
     }
 }
@@ -137,7 +155,39 @@ mod tests {
             product: None,
             interface_number: 0,
             is_usbtmc: true,
+            is_daq: false,
         }
+    }
+
+    fn daq_info() -> UsbDeviceInfo {
+        UsbDeviceInfo {
+            id: UsbId::new(0x3923, 0x717b),
+            bus: 1,
+            address: 90,
+            serial: Some("0x12345678".to_string()),
+            manufacturer: Some("National Instruments".to_string()),
+            product: Some("USB-6009".to_string()),
+            interface_number: 0,
+            is_usbtmc: false,
+            is_daq: true,
+        }
+    }
+
+    #[test]
+    fn test_daq_label_and_driver_kind() {
+        let daq = daq_info();
+        assert_eq!(daq.label(), "NI USB-6009");
+        assert_eq!(daq.driver_kind(), "daq");
+        assert_eq!(info(0x1AB1, 0x04CE, None).driver_kind(), "usbtmc");
+        // A plain, unrecognised device shows no driver.
+        let plain = UsbDeviceInfo {
+            is_usbtmc: false,
+            is_daq: false,
+            product: None,
+            ..info(0x1234, 0x5678, None)
+        };
+        assert_eq!(plain.driver_kind(), "-");
+        assert_eq!(plain.label(), "1234:5678");
     }
 
     #[test]

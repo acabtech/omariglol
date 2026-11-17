@@ -72,6 +72,18 @@ it an instrument:
 ./19_nanovna.sh usb:0x0483:0x5740
 ```
 
+### NI USB-6009 (non-SCPI)
+
+[`21_ni6009.sh`](21_ni6009.sh) demonstrates a USB device that speaks **no SCPI
+at all**: the National Instruments USB-6009 DAQ card (`3923:717B`) has no
+USBTMC interface and no `*IDN?`. The example only enumerates it — it shows up
+in `riglol usb list` with driver kind `daq`. There is no SCPI to send. See
+[`docs/ni-usb6009.md`](../../docs/ni-usb6009.md).
+
+```sh
+./21_ni6009.sh
+```
+
 ## The examples
 
 [`00_smoke_test.sh`](00_smoke_test.sh) runs every function below end to end,
@@ -105,6 +117,7 @@ RIGLOL_DELAY=2 ./00_smoke_test.sh       # or via the environment
 | [`17_reset.sh`](17_reset.sh) | Reset and self-test | `*CLS`, `*RST`, `*TST?` |
 | [`18_usb.sh`](18_usb.sh) | Enumerate and identify over USB | `*IDN?`, `:MEAS:FREQ?` |
 | [`20_capture.sh`](20_capture.sh) | Capture full waveform memory to `.npy` | `riglol capture` |
+| [`21_ni6009.sh`](21_ni6009.sh) | Enumerate a non-SCPI USB DAQ device | `riglol usb list` (no SCPI) |
 
 ## Interactive use
 

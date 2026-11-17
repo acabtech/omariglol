@@ -37,6 +37,7 @@ pub fn default_measurement(instrument_type: InstrumentType) -> Option<&'static s
         | InstrumentType::ElectronicLoad
         | InstrumentType::SwitchModule
         | InstrumentType::VectorNetworkAnalyzer
+        | InstrumentType::DataAcquisition
         | InstrumentType::Unknown => None,
     }
 }

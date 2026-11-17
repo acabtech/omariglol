@@ -169,6 +169,24 @@ examples/scpi/19_nanovna.sh
 Screenshots are not available over USBTMC; use the CDC interface for those. See
 [`docs/nanovna.md`](docs/nanovna.md) for the full command reference.
 
+## Non-SCPI USB devices (NI USB-6009)
+
+Not every USB instrument speaks SCPI. The National Instruments **USB-6009**
+multifunction I/O card (`usb:0x3923:0x717B`) is a first-class device at the
+**detection and identity** level: it is recognised by its vendor/product id,
+labelled a *data acquisition device*, and listed by `riglol usb list` with
+driver kind `daq`. Because it exposes no SCPI/USBTMC endpoint, it intentionally
+has an empty command surface — there is no `*IDN?` to send it, and no DAQ I/O
+is issued. Recognition is descriptor-based via the `USB_DEVICE_PROFILES` table
+(the non-SCPI analogue of the IDN-keyed `DRIVER_PROFILES`).
+
+```bash
+riglol usb list                  # shows the USB-6009 as 'daq'
+examples/scpi/21_ni6009.sh
+```
+
+See [`docs/ni-usb6009.md`](docs/ni-usb6009.md).
+
 ## Release notes
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the latest changes, including the

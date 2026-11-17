@@ -77,7 +77,10 @@ pub use usb::{UsbDeviceInfo, UsbId};
 // Multi-instrument platform entities (concepts.md §4).
 pub use autoscale::{AutoscaleReport, AutoscaleResult, autoscale_workspace};
 pub use connection::Connection;
-pub use driver::{InstrumentDriver, InstrumentType};
+pub use driver::{
+    InstrumentDriver, InstrumentType, USB_DEVICE_PROFILES, UsbDeviceProfile,
+    instrument_type_for_usb, recognize_usb, usb_device_label,
+};
 pub use instrument::{Instrument, InstrumentConfig, InstrumentId, InstrumentState};
 pub use measure::{MeasureReport, MeasurementResult, measure_workspace};
 pub use preset::{Preset, PresetPlan, PresetStep};

@@ -23,7 +23,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::screenshot::profile_for_idn;
 
-/// The broad class of an instrument, inferred from its `*IDN?` string.
+/// The broad class of an instrument, inferred from its `*IDN?` string or, for a
+/// non-SCPI USB device, from its USB vendor/product id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum InstrumentType {
@@ -35,6 +36,7 @@ pub enum InstrumentType {
     ElectronicLoad,
     SwitchModule,
     VectorNetworkAnalyzer,
+    DataAcquisition,
     Unknown,
 }
 
@@ -50,6 +52,7 @@ impl InstrumentType {
             InstrumentType::ElectronicLoad => "electronic load",
             InstrumentType::SwitchModule => "switch module",
             InstrumentType::VectorNetworkAnalyzer => "vector network analyzer",
+            InstrumentType::DataAcquisition => "data acquisition device",
             InstrumentType::Unknown => "instrument",
         }
     }
@@ -65,8 +68,20 @@ impl InstrumentType {
             InstrumentType::ElectronicLoad => "load",
             InstrumentType::SwitchModule => "sw",
             InstrumentType::VectorNetworkAnalyzer => "vna",
+            InstrumentType::DataAcquisition => "daq",
             InstrumentType::Unknown => "inst",
         }
+    }
+
+    /// True when an instrument of this type speaks SCPI over its transport.
+    ///
+    /// A [`InstrumentType::DataAcquisition`] device such as the NI USB-6009 is a
+    /// proprietary USB DAQ card: it exposes no SCPI command layer, so the
+    /// `*IDN?`-derived command surface does not apply and the generic SCPI
+    /// command set is intentionally empty. Discovery still recognises and
+    /// labels it, but the driver reports no operations.
+    pub fn speaks_scpi(&self) -> bool {
+        !matches!(self, InstrumentType::DataAcquisition)
     }
 }
 
@@ -260,6 +275,14 @@ impl InstrumentDriver {
 
 /// The standard operations every instrument supports, plus type-specific ones.
 fn generic_commands(instrument_type: InstrumentType) -> Vec<DriverCommand> {
+    // A device that speaks no SCPI (the NI USB-6009 DAQ) cannot answer even the
+    // IEEE 488.2 common commands, so it gets an empty surface rather than a
+    // standard one. Every other class — including `Unknown`, on the assumption
+    // an unclassified instrument is SCPI — keeps the common commands.
+    if !instrument_type.speaks_scpi() {
+        return Vec::new();
+    }
+
     let mut commands = standard_commands();
 
     match instrument_type {
@@ -355,7 +378,10 @@ fn generic_commands(instrument_type: InstrumentType) -> Vec<DriverCommand> {
                     .described("measure", "Read a chunk of S21 data"),
             ]);
         }
-        InstrumentType::Unknown => {}
+        // A data acquisition device (e.g. the NI USB-6009) speaks no SCPI: its
+        // protocol is NI's proprietary USB DAQ format, so the generic command
+        // surface stays empty and `*IDN?`-derived operations do not apply.
+        InstrumentType::DataAcquisition | InstrumentType::Unknown => {}
     }
 
     commands
@@ -683,6 +709,89 @@ fn ds1000z_commands() -> Vec<DriverCommand> {
     commands
 }
 
+// ---------------------------------------------------------------------------
+// Non-SCPI USB devices: recognition by vendor/product id
+// ---------------------------------------------------------------------------
+
+/// A first-class USB device recognised by its **vendor/product id** rather than
+/// by an `*IDN?` response.
+///
+/// The platform's primary extension point ([`DRIVER_PROFILES`]) is keyed on the
+/// `*IDN?` string, which presupposes the device speaks SCPI. Some USB hardware
+/// — the NI USB-6009 multifunction DAQ, say — exposes no SCPI layer at all, so
+/// it can never answer `*IDN?` and can never be keyed on it. This table is the
+/// descriptor-based equivalent: the USB backend matches an enumerated device's
+/// `vendor:product` pair against [`USB_DEVICE_PROFILES`] to classify it, label
+/// it, and decide whether it is reachable over the SCPI path.
+///
+/// A recognised device is a *first-class entity* the same way a SCPI
+/// instrument is: it appears in discovery, carries a type and identity in the
+/// UI, and is addressable by its `usb:...` selector. What it does *not* get is
+/// a SCPI command surface, because it has none — see
+/// [`InstrumentType::speaks_scpi`].
+pub struct UsbDeviceProfile {
+    /// Friendly device name, e.g. `"NI USB-6009"`.
+    pub name: &'static str,
+    /// USB vendor id.
+    pub vendor: u16,
+    /// USB product id.
+    pub product: u16,
+    /// The instrument class this device belongs to.
+    pub instrument_type: InstrumentType,
+    /// Manufacturer label to use when the USB descriptor string is missing.
+    pub manufacturer: &'static str,
+}
+
+/// Registered non-SCPI USB devices, checked in order.
+///
+/// ## Adding a future USB DAQ
+///
+/// Append a [`UsbDeviceProfile`] entry below with the device's `vendor:product`
+/// id and class. No other code changes: the USB backend, discovery, `riglol
+/// usb list` and the UI all read this table. For devices that *do* speak SCPI,
+/// add a [`DriverProfile`] entry to [`DRIVER_PROFILES`] instead.
+pub static USB_DEVICE_PROFILES: &[UsbDeviceProfile] = &[
+    // National Instruments USB-6009 multifunction I/O (ADC/DAC/digital).
+    UsbDeviceProfile {
+        name: "NI USB-6009",
+        vendor: 0x3923,
+        product: 0x717b,
+        instrument_type: InstrumentType::DataAcquisition,
+        manufacturer: "National Instruments",
+    },
+];
+
+/// The first-class USB device matching a `vendor:product` id, if any.
+pub fn recognize_usb(vendor: u16, product: u16) -> Option<&'static UsbDeviceProfile> {
+    USB_DEVICE_PROFILES
+        .iter()
+        .find(|profile| profile.vendor == vendor && profile.product == product)
+}
+
+/// The instrument class of a recognised non-SCPI USB device, by its
+/// `vendor:product` id, if it is first-class.
+///
+/// Lets UI layers (which normally derive an instrument type from the `*IDN?`
+/// string) fall back to descriptor-based recognition for devices like the NI
+/// USB-6009 that can never answer `*IDN?`.
+pub fn instrument_type_for_usb(vendor: u16, product: u16) -> Option<InstrumentType> {
+    recognize_usb(vendor, product).map(|profile| profile.instrument_type)
+}
+
+/// The human label for a recognised USB device: its profile name, falling back
+/// to the descriptor product string, then to the bare `vendor:product` ids.
+///
+/// Used by the USB backend so a first-class device is always labelled
+/// consistently, whether or not its USB product string is readable.
+pub fn usb_device_label(vendor: u16, product: u16, product_string: Option<&str>) -> String {
+    if let Some(profile) = recognize_usb(vendor, product) {
+        return profile.name.to_string();
+    }
+    product_string
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("{vendor:04x}:{product:04x}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -898,5 +1007,59 @@ mod tests {
         assert_eq!(InstrumentType::Oscilloscope.label(), "oscilloscope");
         assert_eq!(InstrumentType::Oscilloscope.glyph(), "scope");
         assert_eq!(InstrumentType::Unknown.label(), "instrument");
+    }
+
+    #[test]
+    fn test_recognize_ni_usb6009() {
+        let profile = recognize_usb(0x3923, 0x717b).expect("USB-6009 must be recognised");
+        assert_eq!(profile.name, "NI USB-6009");
+        assert_eq!(profile.instrument_type, InstrumentType::DataAcquisition);
+        assert_eq!(profile.manufacturer, "National Instruments");
+        // An unknown id is not recognised.
+        assert!(recognize_usb(0x1234, 0x5678).is_none());
+    }
+
+    #[test]
+    fn test_usb_device_label() {
+        // A recognised device gets its profile name regardless of the
+        // descriptor string.
+        assert_eq!(
+            usb_device_label(0x3923, 0x717b, Some("USB-6009")),
+            "NI USB-6009"
+        );
+        assert_eq!(usb_device_label(0x3923, 0x717b, None), "NI USB-6009");
+        // An unrecognised device falls back to the product string, then ids.
+        assert_eq!(
+            usb_device_label(0x1234, 0x5678, Some("Acme Widget")),
+            "Acme Widget"
+        );
+        assert_eq!(usb_device_label(0x1234, 0x5678, None), "1234:5678");
+    }
+
+    #[test]
+    fn test_data_acquisition_does_not_speak_scpi() {
+        // The USB-6009 has no SCPI command surface.
+        assert!(!InstrumentType::DataAcquisition.speaks_scpi());
+        assert!(InstrumentType::Oscilloscope.speaks_scpi());
+        // The generic command set is empty for a DAQ device.
+        let commands = generic_commands(InstrumentType::DataAcquisition);
+        assert!(commands.is_empty(), "DAQ must expose no SCPI commands");
+    }
+
+    #[test]
+    fn test_usb_device_profiles_registry_is_well_formed() {
+        assert!(!USB_DEVICE_PROFILES.is_empty());
+        for profile in USB_DEVICE_PROFILES {
+            assert!(!profile.name.is_empty());
+            // Recognising by id must round-trip through the table.
+            assert!(recognize_usb(profile.vendor, profile.product).is_some());
+            // A non-SCPI device must report speaks_scpi() == false so the
+            // generic SCPI surface stays empty.
+            assert!(
+                !profile.instrument_type.speaks_scpi(),
+                "{} should not speak SCPI",
+                profile.name
+            );
+        }
     }
 }

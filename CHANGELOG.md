@@ -6,6 +6,20 @@ semantic versioning.
 
 ## [Unreleased]
 
+### Added
+
+- **NI USB-6009 is a first-class USB device.** The National Instruments
+  USB-6009 multifunction I/O card (`3923:717b`) is now recognised by its USB
+  vendor/product id, listed by `riglol usb list` with a `daq` driver kind, and
+  folded into discovery — even though it speaks no SCPI and exposes no USBTMC
+  interface. It is labelled as a *data acquisition device*
+  (`InstrumentType::DataAcquisition`) and deliberately carries an empty SCPI
+  command surface. A udev rule grants unprivileged enumeration. Detection and
+  identity only for now; no DAQ I/O.
+- **Descriptor-based USB device registry.** A new `USB_DEVICE_PROFILES` table
+  in `omariglol-core` classifies non-SCPI USB instruments by `vendor:product`
+  — the descriptor analogue of the IDN-keyed `DRIVER_PROFILES`.
+
 ## [0.1.8] — 2026-11-17
 
 Redesigned desktop and plugin UI, USB backend hardening, and the two reported

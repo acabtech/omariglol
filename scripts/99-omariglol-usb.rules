@@ -15,6 +15,12 @@
 # Rigol DS1000Z / MSO1000Z series (vendor 0x1AB1, product 0x04CE).
 SUBSYSTEM=="usb", ATTR{idVendor}=="1ab1", ATTR{idProduct}=="04ce", MODE="0660", GROUP="uucp", TAG+="uaccess"
 
+# National Instruments USB-6009 multifunction I/O (vendor 0x3923, product 0x717B).
+# This device exposes no USBTMC interface, so the generic class rule above does
+# not match it; grant access by explicit id so `riglol usb list` can enumerate
+# and label it without root.
+SUBSYSTEM=="usb", ATTR{idVendor}=="3923", ATTR{idProduct}=="717b", MODE="0660", GROUP="uucp", TAG+="uaccess"
+
 # Generic USBTMC instruments: interface class 0xFE, subclass 0x03.
 #
 # ID_USB_INTERFACES encodes each interface as ccsspp, so a USBTMC-USB488

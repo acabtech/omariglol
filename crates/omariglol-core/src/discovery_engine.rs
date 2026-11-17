@@ -597,7 +597,12 @@ impl DiscoveryEngine {
         {
             discovered.extend(devices.into_iter().filter_map(|info| {
                 let is_nanodla_bootloader = info.id.vendor == 0x1d50 && info.id.product == 0x608c;
-                if info.is_usbtmc || is_nanodla_bootloader {
+                // Fold in three kinds of USB device: a USBTMC SCPI instrument,
+                // a nanoDLA waiting for its firmware to load, and a first-class
+                // non-SCPI device recognised by id (the NI USB-6009 DAQ). The
+                // latter carries no SCPI capabilities but is still listed and
+                // labelled so it appears as a discovered instrument.
+                if info.is_usbtmc || is_nanodla_bootloader || info.is_daq {
                     Some(CachedInstrument::from_usb(&info, options.ttl_secs))
                 } else {
                     None
@@ -677,6 +682,21 @@ mod tests {
             product: Some(product.to_string()),
             interface_number: 0,
             is_usbtmc: true,
+            is_daq: false,
+        }
+    }
+
+    fn daq_info() -> crate::usb::UsbDeviceInfo {
+        crate::usb::UsbDeviceInfo {
+            id: crate::usb::UsbId::new(0x3923, 0x717b),
+            bus: 1,
+            address: 90,
+            serial: Some("0x12345678".to_string()),
+            manufacturer: Some("National Instruments".to_string()),
+            product: Some("USB-6009".to_string()),
+            interface_number: 0,
+            is_usbtmc: false,
+            is_daq: true,
         }
     }
 
@@ -690,6 +710,20 @@ mod tests {
         assert!(entry.device.usb.is_some());
         assert!(entry.idn.is_empty());
         assert_eq!(entry.display_address(), "usb:0x1AB1:0x04CE:DS1ZA1");
+    }
+
+    #[test]
+    fn test_cached_instrument_from_daq_usb() {
+        // A non-SCPI DAQ device folds into discovery by descriptor alone: no
+        // IDN, no capabilities, and an identity built from the USB strings.
+        let entry = CachedInstrument::from_usb(&daq_info(), 300);
+        assert_eq!(entry.vendor, "National Instruments");
+        assert_eq!(entry.model, "USB-6009");
+        assert_eq!(entry.serial, "0x12345678");
+        assert!(entry.idn.is_empty());
+        assert!(entry.capabilities.is_empty());
+        assert_eq!(entry.device.method, DiscoveryMethod::Usb);
+        assert_eq!(entry.display_address(), "usb:0x3923:0x717B:0x12345678");
     }
 
     #[test]

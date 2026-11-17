@@ -1075,7 +1075,7 @@ fn cmd_usb(args: UsbArgs) -> anyhow::Result<()> {
                         device.bus,
                         device.address,
                         device.interface_number,
-                        if device.is_usbtmc { "usbtmc" } else { "-" },
+                        device.driver_kind(),
                         device.label(),
                     );
                 }

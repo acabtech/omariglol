@@ -60,7 +60,7 @@ Three frontends over one protocol core:
 
 Full detail in [`docs/architecture.md`](docs/architecture.md).
 
-## Feature set (0.1.8)
+## Feature set (0.1.9)
 
 The CLI mirrors `lxi-tools`, with Python in place of Lua:
 
@@ -189,13 +189,13 @@ See [`docs/ni-usb6009.md`](docs/ni-usb6009.md).
 
 ## Release notes
 
-See [`CHANGELOG.md`](CHANGELOG.md) for the latest changes, including the
-repo-root plugin manifest, transport-aware screenshots, parametrised SCPI
-queries in the console, and workspace USB reconnects.
+See [`CHANGELOG.md`](CHANGELOG.md) for the latest changes, including first-class
+NI USB-6009 detection, the descriptor-based `USB_DEVICE_PROFILES` registry, and
+the `daq` driver kind in `riglol usb list`.
 
 ## Roadmap
 
-- **0.1.x** — the feature set above; the current release is 0.1.8.
+- **0.1.x** — the feature set above; the current release is 0.1.9.
 - **0.2.0** — scripting depth: a saved snippet library and a headless daemon so
   scripts can share one instrument connection. Live charts, CSV logging and
   multi-instrument workspace scripts have already landed.

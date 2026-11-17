@@ -4,7 +4,10 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 semantic versioning.
 
-## [Unreleased]
+## [0.1.9] — 2026-11-17
+
+First-class detection and identity for non-SCPI USB instruments, starting with
+the NI USB-6009.
 
 ### Added
 

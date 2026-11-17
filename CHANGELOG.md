@@ -6,6 +6,37 @@ semantic versioning.
 
 ## [Unreleased]
 
+## [0.1.8] — 2026-11-17
+
+Redesigned desktop and plugin UI, USB backend hardening, and the two reported
+transport/scripting bugs.
+
+### Added
+
+- **Honest status dot in the Omarchy panel.** Each instrument result row now
+  shows a coloured dot paired with an always-visible text word (`ok`/`idle`/
+  `error`) beside the reading, honoring DESIGN.md §2 (never colour-only). The
+  `statusWord`/`statusColor`/`statusFill` helpers drive both the word and the dot.
+- **nanoDLA FX2 bootloader support** in the USB backend, with USB descriptor
+  strings sanitised so non-ASCII product/serial fields cannot abort enumeration.
+
+### Changed
+
+- **Desktop web UI redesigned.** `src/styles.css` and `src/App.tsx` reworked to
+  the codesigned shell (icon rail, topbar, focus strip, surface groups).
+- **Plugin `Model.js` and discovery engine updated** to match the redesign and
+  resume autoscale handling.
+
+### Fixed
+
+- **Raw transport surfaces truncated reads.** A truncated definite-length block
+  now returns `UnexpectedEof` instead of silently yielding a short payload (#21).
+- **Sub-second timeouts are preserved on reconnect.** The script engine rounds
+  up positive sub-second instrument timeouts when persisting config, so a
+  reconnect no longer stores zero (#22).
+- **CI repairs a corrupted cached Rust toolchain** on the self-hosted runners
+  before installing, avoiding stale-toolchain failures.
+
 ## [0.1.7] — 2026-11-15
 
 ### Changed

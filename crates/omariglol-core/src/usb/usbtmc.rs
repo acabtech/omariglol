@@ -225,6 +225,12 @@ mod real {
                 let len = payload_len.unwrap_or(0);
                 let attributes = buf[8];
                 let end = payload_end(len, filled)?;
+                if data.len().saturating_add(len) > crate::transport::raw::MAX_RESPONSE {
+                    return Err(Error::Malformed(format!(
+                        "USBTMC response exceeds MAX_RESPONSE ({} bytes)",
+                        crate::transport::raw::MAX_RESPONSE
+                    )));
+                }
                 data.extend_from_slice(&buf[HEADER_LEN..end]);
 
                 if attributes & EOM != 0 || len == 0 {

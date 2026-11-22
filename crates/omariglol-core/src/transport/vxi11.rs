@@ -355,6 +355,12 @@ impl ScpiTransport for Vxi11Transport {
             self.last_reason = reason;
             let chunk = reader.opaque()?;
             let chunk_len = chunk.len();
+            if data.len().saturating_add(chunk_len) > super::raw::MAX_RESPONSE {
+                return Err(Error::Malformed(format!(
+                    "VXI-11 response exceeds MAX_RESPONSE ({} bytes)",
+                    super::raw::MAX_RESPONSE
+                )));
+            }
             data.extend_from_slice(chunk);
 
             // END means the instrument has sent everything. A zero-length chunk

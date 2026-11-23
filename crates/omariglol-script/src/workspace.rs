@@ -862,6 +862,9 @@ impl Workspace {
     /// Persist the workspace to its directory.
     fn save(&self) -> PyResult<()> {
         let data = self.data.lock().unwrap();
+        if !data.inner.id.is_valid() {
+            return Err(PyValueError::new_err("invalid workspace id"));
+        }
         let Some(dir) = &data.dir else {
             return Ok(());
         };

@@ -83,11 +83,15 @@ fn read_usb_strings(
     }
 
     (
-        serial.map(|s| sanitize_usb_string(&s)).filter(|s| !s.is_empty()),
+        serial
+            .map(|s| sanitize_usb_string(&s))
+            .filter(|s| !s.is_empty()),
         manufacturer
             .map(|s| sanitize_usb_string(&s))
             .filter(|s| !s.is_empty()),
-        product.map(|s| sanitize_usb_string(&s)).filter(|s| !s.is_empty()),
+        product
+            .map(|s| sanitize_usb_string(&s))
+            .filter(|s| !s.is_empty()),
     )
 }
 
@@ -189,7 +193,9 @@ fn nanodla_firmware_candidates() -> Vec<PathBuf> {
     }
     if let Some(home) = std::env::var_os("HOME") {
         let home = PathBuf::from(home);
-        out.push(home.join("projects/nanoDLA-USBTMC/firmware/build/usbtmc-usbtmc/nanodla-usbtmc-usbtmc.ihx"));
+        out.push(home.join(
+            "projects/nanoDLA-USBTMC/firmware/build/usbtmc-usbtmc/nanodla-usbtmc-usbtmc.ihx",
+        ));
         out.push(home.join("projects/nanoDLA-USBTMC/dist/nanodla-usbtmc-usbtmc.ihx"));
     }
     out
@@ -199,15 +205,23 @@ fn nanodla_firmware_candidates() -> Vec<PathBuf> {
 ///
 /// Returns true if a load was attempted (successfully sent).
 fn try_load_nanodla_firmware(device: &rusb::Device<Context>) -> bool {
-    let fw_path = nanodla_firmware_candidates().into_iter().find(|p| p.is_file());
+    let fw_path = nanodla_firmware_candidates()
+        .into_iter()
+        .find(|p| p.is_file());
     let Some(fw_path) = fw_path else { return false };
-    let Ok(ihx) = std::fs::read_to_string(&fw_path) else { return false };
-    let Ok(chunks) = parse_ihex(&ihx) else { return false };
+    let Ok(ihx) = std::fs::read_to_string(&fw_path) else {
+        return false;
+    };
+    let Ok(chunks) = parse_ihex(&ihx) else {
+        return false;
+    };
     if chunks.is_empty() {
         return false;
     }
 
-    let Ok(handle) = device.open() else { return false };
+    let Ok(handle) = device.open() else {
+        return false;
+    };
     let timeout = Duration::from_millis(1000);
 
     // Reset CPU (hold in reset), download, release.
@@ -490,7 +504,9 @@ pub fn enumerate() -> Vec<UsbDeviceInfo> {
     if let Ok(list) = context.devices() {
         let mut loaded = false;
         for device in list.iter() {
-            let Ok(desc) = device.device_descriptor() else { continue };
+            let Ok(desc) = device.device_descriptor() else {
+                continue;
+            };
             if desc.vendor_id() == NANODLA_BOOTLOADER_VID
                 && desc.product_id() == NANODLA_BOOTLOADER_PID
                 && try_load_nanodla_firmware(&device)

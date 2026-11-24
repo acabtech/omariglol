@@ -862,6 +862,9 @@ impl Workspace {
     /// Persist the workspace to its directory.
     fn save(&self) -> PyResult<()> {
         let data = self.data.lock().unwrap();
+        if !data.inner.id.is_valid() {
+            return Err(PyValueError::new_err("invalid workspace id"));
+        }
         let Some(dir) = &data.dir else {
             return Ok(());
         };
@@ -971,7 +974,6 @@ fn python_to_json(value: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
     ))
 }
 
-
 /// Convert a connection timeout into whole seconds for [`InstrumentConfig`].
 ///
 /// Sub-second positive timeouts are rounded up so a value like 0.5s does not
@@ -1019,7 +1021,6 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
-
 
     #[test]
     fn test_persisted_timeout_secs_rounds_subsecond_up() {

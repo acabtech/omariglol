@@ -47,6 +47,19 @@ impl WorkspaceId {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Whether this id is safe to use as a single filename component.
+    ///
+    /// Workspace ids are persisted as `<id>.json` inside a workspace
+    /// directory, so ids containing path separators or traversal segments
+    /// would escape that directory.
+    pub fn is_valid(&self) -> bool {
+        !self.0.is_empty()
+            && self
+                .0
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    }
 }
 
 impl std::fmt::Display for WorkspaceId {
@@ -321,6 +334,9 @@ impl WorkspaceManager {
 
     /// Delete a workspace and clear it as active if it was.
     pub fn delete(&mut self, id: &WorkspaceId) -> bool {
+        if !id.is_valid() {
+            return false;
+        }
         let before = self.workspaces.len();
         self.workspaces.retain(|workspace| &workspace.id != id);
         if self.workspaces.len() == before {
@@ -337,6 +353,12 @@ impl WorkspaceManager {
 
     /// Persist a workspace to disk, if a directory is configured.
     pub fn save(&self, id: &WorkspaceId) -> std::io::Result<()> {
+        if !id.is_valid() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "invalid workspace id",
+            ));
+        }
         let Some(dir) = &self.dir else {
             return Ok(());
         };
@@ -551,6 +573,36 @@ mod tests {
         std::fs::write(dir.join("bad.json"), "{ not json").unwrap();
         let mut manager = WorkspaceManager::with_dir(&dir);
         assert_eq!(manager.load_all().unwrap(), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_workspace_id_validation() {
+        assert!(WorkspaceId("ws-abc_123".to_string()).is_valid());
+        assert!(!WorkspaceId("".to_string()).is_valid());
+        assert!(!WorkspaceId("../evil".to_string()).is_valid());
+        assert!(!WorkspaceId("..".to_string()).is_valid());
+        assert!(!WorkspaceId("foo/bar".to_string()).is_valid());
+        assert!(!WorkspaceId("foo\\bar".to_string()).is_valid());
+        assert!(!WorkspaceId(".hidden".to_string()).is_valid());
+    }
+
+    #[test]
+    fn test_manager_rejects_invalid_workspace_id_on_save_and_delete() {
+        let dir = std::env::temp_dir().join(format!("omariglol-id-{}", now_millis()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut manager = WorkspaceManager::with_dir(&dir);
+        let id = manager.create("Valid");
+        manager.save(&id).unwrap();
+
+        let evil = WorkspaceId("../evil".to_string());
+        let err = manager.save(&evil).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(!dir.parent().unwrap().join("evil.json").exists());
+
+        assert!(!manager.delete(&evil));
+        assert!(dir.join(format!("{}.json", id.as_str())).exists());
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

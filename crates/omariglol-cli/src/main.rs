@@ -1220,6 +1220,10 @@ fn snapshot_file_timestamp() -> String {
 }
 
 /// Strip characters that would make an instrument label unsafe as a filename.
+///
+/// Rejects `.` and `..` path components, strips leading dots, and falls back to
+/// `"instrument"` when the sanitized value is empty or only dots, so the result
+/// cannot traverse outside the intended snapshot directory.
 fn safe_component(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     for ch in input.chars() {
@@ -1229,11 +1233,12 @@ fn safe_component(input: &str) -> String {
             out.push('_');
         }
     }
-    let trimmed = out.trim_matches('_').to_string();
-    if trimmed.is_empty() {
+    let trimmed = out.trim_matches('_');
+    let trimmed = trimmed.trim_start_matches(['.', '_']);
+    if trimmed.is_empty() || trimmed == "." || trimmed == ".." {
         "instrument".to_string()
     } else {
-        trimmed
+        trimmed.to_string()
     }
 }
 
@@ -1604,7 +1609,33 @@ fn print_autoscale_table(report: &autoscale::AutoscaleReport) {
 
 #[cfg(test)]
 mod tests {
-    use super::is_query;
+    use super::{is_query, safe_component};
+
+    #[test]
+    fn test_safe_component_rejects_traversal() {
+        assert_eq!(safe_component(".."), "instrument");
+        assert_eq!(safe_component("."), "instrument");
+        assert_eq!(safe_component("..."), "instrument");
+        assert_eq!(safe_component("../.."), "instrument");
+    }
+
+    #[test]
+    fn test_safe_component_strips_leading_dots() {
+        assert_eq!(safe_component(".hidden"), "hidden");
+        assert_eq!(safe_component("..foo"), "foo");
+    }
+
+    #[test]
+    fn test_safe_component_falls_back_when_empty() {
+        assert_eq!(safe_component(""), "instrument");
+        assert_eq!(safe_component("___"), "instrument");
+    }
+
+    #[test]
+    fn test_safe_component_preserves_safe_names() {
+        assert_eq!(safe_component("scope-1"), "scope-1");
+        assert_eq!(safe_component("my_instrument.1"), "my_instrument.1");
+    }
 
     #[test]
     fn test_query_detection_plain() {

@@ -393,7 +393,6 @@ mod tests {
         let _ = handle.join();
     }
 
-
     #[test]
     fn test_raw_bytes_past_terminator_buffered() {
         let (addr, handle) = spawn_server(|mut s| {

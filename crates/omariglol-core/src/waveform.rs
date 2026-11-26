@@ -29,6 +29,11 @@ use crate::error::{Error, Result};
 use crate::screenshot::parse_ieee_block;
 use crate::transport::ScpiTransport;
 
+/// The largest point count a DS1000Z-family instrument can report (24 M on a
+/// DS1054Z with the deep-memory option). Anything above this in a `:WAV:PRE?`
+/// response is treated as malformed rather than trusted.
+const MAX_WAVEFORM_POINTS: u64 = 24_000_000;
+
 /// The SCPI waveform data format (`:WAV:FORM`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -148,17 +153,29 @@ impl WaveformPreamble {
             )));
         }
         let num = |index: usize, name: &str| -> Result<f64> {
-            fields[index].parse::<f64>().map_err(|_| {
+            let value = fields[index].parse::<f64>().map_err(|_| {
                 Error::Malformed(format!(
                     "waveform preamble field {name} is not a number: {:?}",
                     fields[index]
                 ))
-            })
+            })?;
+            if !value.is_finite() {
+                return Err(Error::Malformed(format!(
+                    "waveform preamble field {name} is not finite: {value:?}"
+                )));
+            }
+            Ok(value)
         };
+        let points = num(2, "points")?;
+        if points < 1.0 || points > MAX_WAVEFORM_POINTS as f64 {
+            return Err(Error::Malformed(format!(
+                "waveform preamble points {points} outside 1..={MAX_WAVEFORM_POINTS}"
+            )));
+        }
         Ok(WaveformPreamble {
             format_code: num(0, "format")? as i64,
             type_code: num(1, "type")? as i64,
-            points: num(2, "points")? as u64,
+            points: points as u64,
             count: num(3, "count")? as i64,
             x_increment: num(4, "xincrement")?,
             x_origin: num(5, "xorigin")?,
@@ -377,6 +394,16 @@ pub fn capture(transport: &mut dyn ScpiTransport, options: &CaptureOptions) -> R
         ));
     }
 
+    // Expected byte count from the preamble: `points` samples at `bytes_per_point`
+    // each. Chunks that would push the accumulated buffer past this bound are
+    // rejected so a lying instrument cannot make us allocate without limit.
+    let bytes_per_point = match options.format {
+        WaveformFormat::Byte => 1u64,
+        WaveformFormat::Word => 2,
+        WaveformFormat::Ascii => 1, // upper bound; ASCII samples never exceed this
+    };
+    let max_bytes = total_points.saturating_mul(bytes_per_point);
+
     let mut raw = Vec::new();
     let mut chunks = 0usize;
     let mut start: u64 = 1;
@@ -390,6 +417,12 @@ pub fn capture(transport: &mut dyn ScpiTransport, options: &CaptureOptions) -> R
                 "waveform chunk {start}..{stop} is not a valid IEEE-488.2 block"
             ))
         })?;
+        if (raw.len() as u64).saturating_add(payload.len() as u64) > max_bytes {
+            return Err(Error::Malformed(format!(
+                "waveform data exceeds the {} points reported by the preamble",
+                total_points
+            )));
+        }
         raw.extend_from_slice(&payload);
         chunks += 1;
         start = stop + 1;
@@ -529,6 +562,39 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_preamble_rejects_non_finite_points() {
+        for bad in ["inf", "-inf", "NaN", "1e400"] {
+            let text = format!("0,0,{bad},1,1,1,1,1,1,1");
+            assert!(
+                WaveformPreamble::parse(&text).is_err(),
+                "expected {bad} to be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_preamble_rejects_out_of_bounds_points() {
+        for bad in ["0", "-5", "25000000"] {
+            let text = format!("0,0,{bad},1,1,1,1,1,1,1");
+            assert!(
+                WaveformPreamble::parse(&text).is_err(),
+                "expected {bad} to be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_preamble_rejects_non_finite_x_increment() {
+        assert!(WaveformPreamble::parse("0,0,1200,1,inf,0,0,0.01,0,128").is_err());
+        assert!(WaveformPreamble::parse("0,0,1200,1,NaN,0,0,0.01,0,128").is_err());
+    }
+
+    #[test]
+    fn test_parse_preamble_rejects_non_finite_y_reference() {
+        assert!(WaveformPreamble::parse("0,0,1200,1,5e-09,0,0,0.01,0,inf").is_err());
+    }
+
+    #[test]
     fn test_decode_byte_samples() {
         let preamble = WaveformPreamble {
             format_code: 0,
@@ -648,7 +714,9 @@ mod tests {
             ..Default::default()
         };
         let mut mock = MockTransport::new(vec![
-            preamble_text(0, 1).into_bytes(),
+            // 11 payload bytes, so the preamble must admit at least that many
+            // points for the passthrough path to stay under the byte cap.
+            preamble_text(0, 12).into_bytes(),
             b"not a block".to_vec(),
         ]);
         // A non-block payload is passed through by the parser, so force a
